@@ -1,0 +1,534 @@
+﻿:root {
+    --bg: #050816;
+    --panel: rgba(15, 23, 42, 0.92);
+    --surface: #111827;
+    --card: #1f2937;
+    --text: #eef2ff;
+    --muted: #94a3b8;
+    --input: #0f172a;
+    --border: rgba(148, 163, 184, 0.18);
+    --accent: #00b4ff;
+    --accent-strong: #3b82f6;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    overflow: hidden;
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: radial-gradient(circle at top left, rgba(0, 180, 255, 0.18), transparent 20%),
+        radial-gradient(circle at bottom right, rgba(56, 189, 248, 0.12), transparent 18%),
+        var(--bg);
+    color: var(--text);
+}
+
+body.light-mode {
+    --bg: #f8fafc;
+    --panel: rgba(255, 255, 255, 0.96);
+    --surface: #ffffff;
+    --card: #f1f5f9;
+    --text: #0f172a;
+    --muted: #475569;
+    --input: #e2e8f0;
+    --border: rgba(148, 163, 184, 0.24);
+    --accent: #2563eb;
+    --accent-strong: #1d4ed8;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+img {
+    max-width: 100%;
+    display: block;
+}
+
+#particleCanvas {
+    position: fixed;
+    inset: 0;
+    z-index: -1; /* behind all UI */
+    opacity: 0.75;
+    pointer-events: none;
+}
+
+button,
+input {
+    font: inherit;
+}
+
+body,
+button,
+input,
+textarea {
+    color: inherit;
+}
+
+.app-shell {
+    min-height: 100vh;
+    padding: 24px;
+    display: flex;
+    align-items: stretch;
+    gap: 20px;
+}
+
+.container {
+    flex: 1 1 auto;
+    height: calc(100vh - 48px);
+    max-width: none;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 30px 100px rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(18px);
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 28px 32px 0;
+}
+
+.brand-group {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+
+.logo {
+    width: 56px;
+    height: 56px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.08);
+    padding: 12px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.header h1 {
+    margin: 0;
+    font-size: clamp(1.75rem, 2vw, 2.4rem);
+    letter-spacing: -0.03em;
+}
+
+.header p {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+.status-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 16px 32px 20px;
+}
+
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 10px 14px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--muted);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.92rem;
+}
+
+.chat-box {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    padding: 24px 32px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    overflow-y: auto;
+    background: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.02) 100%);
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.chat-box .message {
+    position: relative;
+    z-index: 1;
+}
+
+.chat-box::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
+
+.message {
+    max-width: 78%;
+    padding: 18px 20px;
+    border-radius: 24px;
+    line-height: 1.7;
+    word-break: break-word;
+}
+
+.message strong {
+    display: block;
+    margin-bottom: 10px;
+}
+
+.bot {
+    background: rgba(15, 23, 42, 0.95);
+    color: var(--text);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.user {
+    align-self: flex-end;
+    background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.input-area {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 14px;
+    align-items: end;
+    padding: 22px 32px 32px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+}
+
+.input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.hint {
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+input {
+    width: 100%;
+    padding: 18px 20px;
+    border-radius: 20px;
+    background: var(--input);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text);
+    outline: none;
+}
+
+input::placeholder {
+    color: var(--muted);
+}
+
+.send-button {
+    min-width: 130px;
+    border-radius: 20px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+    color: white;
+    border: none;
+    cursor: pointer;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 18px 24px;
+}
+
+.send-button::before {
+    content: "⚡";
+    display: inline-flex;
+    font-size: 1.1rem;
+}
+
+.send-button:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 18px 30px rgba(0, 116, 255, 0.24);
+}
+
+.send-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.btn-icon {
+    width: 56px;
+    height: 56px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 1.25rem;
+    display: grid;
+    place-items: center;
+    transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.btn-icon:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateY(-1px);
+}
+
+.settings-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(3, 11, 25, 0.72);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+    z-index: 20;
+}
+
+.settings-overlay.visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.settings-panel {
+    position: fixed;
+    right: 24px;
+    top: 24px;
+    width: min(380px, calc(100% - 40px));
+    border-radius: 28px;
+    padding: 24px;
+    background: rgba(15, 23, 42, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
+    transform: translateY(-20px) scale(0.98);
+    opacity: 0;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    z-index: 30;
+}
+
+.settings-panel.visible {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+}
+
+.settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.settings-header h2 {
+    margin: 0;
+    font-size: 1.2rem;
+}
+
+.settings-header p {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: 0.95rem;
+}
+
+.setting-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 18px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 16px;
+}
+
+.setting-item label {
+    color: var(--text);
+    font-weight: 600;
+}
+
+input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+}
+
+.settings-note {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.6;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Sidebar */
+.sidebar {
+    width: 280px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    border: 1px solid rgba(255,255,255,0.04);
+    border-radius: 18px;
+    padding: 18px;
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: auto;
+}
+
+.sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.convo-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.convo-item {
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.02);
+    cursor: pointer;
+    font-weight: 600;
+}
+
+/* N badge for sending */
+.n-badge {
+    display: inline-grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: white;
+    font-weight: 800;
+    box-shadow: 0 8px 20px rgba(0,180,255,0.18);
+}
+
+/* Sending animation */
+.send-button.sending .n-badge {
+    animation: n-pop 1s infinite linear;
+}
+
+@keyframes n-pop {
+    0% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-3px) scale(1.03); }
+    100% { transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 760px) {
+    body {
+        overflow: auto;
+    }
+
+    .app-shell {
+        padding: 12px;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    /* Hide the desktop sidebar on small screens */
+    .sidebar {
+        display: none;
+    }
+
+    .container {
+        border-radius: 16px;
+        height: 100vh;
+        padding: 12px 0 0 0;
+        max-width: 100%;
+    }
+
+    .header,
+    .status-bar,
+    .input-area {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .chat-box {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-bottom: 160px; /* reserve space for the fixed input area */
+    }
+
+    /* Keep brand compact on mobile */
+    .brand-group {
+        flex-direction: row;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .header h1 {
+        font-size: 1.1rem;
+    }
+
+    /* Make the send button compact and touch-friendly */
+    .send-button {
+        min-width: 56px;
+        padding: 12px;
+        border-radius: 14px;
+    }
+
+    /* Fix input area to bottom for easy reach on mobile */
+    .input-area {
+        position: fixed;
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        z-index: 40;
+        background: var(--surface);
+        border-radius: 14px;
+        align-items: center;
+        grid-template-columns: 1fr auto;
+        padding: 12px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+
+    .input-group .hint {
+        display: none;
+    }
+
+    input {
+        padding: 14px;
+        font-size: 1rem;
+    }
+
+    /* Make messages use full width of the viewport */
+    .message {
+        max-width: 100%;
+        padding: 14px;
+    }
+
+    /* Show a compact send icon instead of text on small screens */
+    .send-button::before { content: ""; }
+    .send-button span { display: none; }
+    .n-badge { width: 36px; height: 36px; }
+
+    .btn-icon {
+        width: 48px;
+        height: 48px;
+    }
+
+    .chat-box .message + .message { margin-top: 8px; }
+}

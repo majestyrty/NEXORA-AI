@@ -1,0 +1,80 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexora AI</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2>Conversations</h2>
+                <button id="openSettingsMobile" class="btn-icon" aria-label="Open settings">⚙</button>
+            </div>
+            <div id="convoList" class="convo-list">
+                <!-- conversation items will be populated here -->
+            </div>
+        </aside>
+
+        <div class="container">
+            <header class="header">
+                <div class="brand-group">
+                    <img src="logo.png" alt="Nexora Logo" class="logo">
+                    <div>
+                        <h1>Nexora AI</h1>
+                        <p>Your intelligent assistant for fast, confident responses.</p>
+                    </div>
+                </div>
+                <button id="settingsBtn" class="btn-icon" aria-label="Open settings">⚙</button>
+            </header>
+
+            <div class="status-bar">
+                <span class="status-pill">Live chat</span>
+                <span class="status-pill">Pro answers in seconds</span>
+            </div>
+
+            <main class="chat-box" id="chat" role="log" aria-live="polite">
+                <article class="message bot">
+                    <strong>👋 Welcome to Nexora AI.</strong>
+                    <p>Ask anything, and Nexora will deliver polished, professional guidance instantly.</p>
+                </article>
+            </main>
+
+            <footer class="input-area">
+                <label for="message" class="sr-only">Type your question</label>
+                <div class="input-group">
+                    <input id="message" type="text" placeholder="Ask Nexora AI anything..." autocomplete="off" spellcheck="false">
+                    <span class="hint">Press Enter or click Ask Nexora</span>
+                </div>
+                <button type="button" id="sendBtn" class="send-button"><span>Ask Nexora</span></button>
+            </footer>
+        </div>
+
+        <div class="settings-overlay hidden" id="settingsOverlay"></div>
+        <aside class="settings-panel hidden" id="settingsPanel">
+            <div class="settings-header">
+                <div>
+                    <h2>Settings</h2>
+                    <p>Adjust your interface preferences.</p>
+                </div>
+                <button id="closeSettings" class="btn-icon" aria-label="Close settings">×</button>
+            </div>
+            <div class="setting-item">
+                <label for="darkToggle">Dark mode</label>
+                <input type="checkbox" id="darkToggle" checked>
+            </div>
+            <div class="setting-item">
+                <label for="particleToggle">Particle background</label>
+                <input type="checkbox" id="particleToggle" checked>
+            </div>
+            <p class="settings-note">Preferences are saved for your next visit.</p>
+        </aside>
+    </div>
+
+    <script src="particles.js"></script>
+    <script src="script.js"></script>
+    <script src="settings.js"></script>
+</body>
+</html>
