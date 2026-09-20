@@ -1,12 +1,25 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nexora AI</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
-<body>
+<body class="auth-checking">
+    <section id="authScreen" class="auth-screen" hidden>
+        <div class="auth-card">
+            <img src="logo.png" alt="Nexora AI" class="auth-logo">
+            <p class="eyebrow">NEXORA AI</p>
+            <h1>Think Rightly. Create boldly.</h1>
+            <p class="auth-copy">Sign in to keep your workspace secure and bring your conversations, files, and AI tools together.</p>
+            <button id="guestSignIn" class="guest-button" type="button">Continue as Guest</button>
+            <div class="auth-divider"><span>or</span></div>
+            <div id="googleSignIn" class="google-sign-in"></div>
+            <p id="authError" class="auth-error" role="alert"></p>
+        </div>
+    </section>
     <div class="app-shell">
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-brand"><img src="logo.png" alt="" class="sidebar-logo"><strong>NEXORA AI</strong></div>
@@ -14,6 +27,10 @@
             <input id="searchChats" class="search-input" type="search" placeholder="Search conversations..." aria-label="Search conversations">
             <div class="sidebar-label">Recent conversations</div>
             <div id="convoList" class="convo-list"></div>
+            <div class="profile-card">
+                <img id="userAvatar" class="user-avatar" alt="">
+                <div><strong id="userName">Nexora user</strong><small id="userEmail"></small></div>
+            </div>
             <div class="sidebar-footer">
                 <button id="settingsBtn" class="sidebar-action">⚙ Settings</button>
                 <button id="logoutBtn" class="sidebar-action">↪ Logout</button>
@@ -29,8 +46,9 @@
             <main class="chat-box" id="chat" role="log" aria-live="polite"></main>
             <footer class="input-area">
                 <div id="attachmentPreview" class="attachment-preview" aria-live="polite"></div>
+                <p id="fileError" class="file-error" role="alert"></p>
                 <div class="composer-row">
-                    <button id="attachBtn" class="btn-icon" type="button" aria-label="Attach files">📎</button>
+                    <button id="attachBtn" class="btn-icon add-button" type="button" aria-label="Add files">+</button>
                     <input id="fileInput" type="file" hidden multiple accept=".pdf,.txt,.doc,.docx,.csv,.xlsx,.jpg,.jpeg,.png,.webp,image/*">
                     <div class="input-group"><label for="message" class="sr-only">Type your question</label><textarea id="message" rows="1" placeholder="Ask Nexora AI anything..." autocomplete="off" spellcheck="true"></textarea><span class="hint">Enter to send · Shift + Enter for a new line</span></div>
                     <button type="button" id="sendBtn" class="send-button" disabled><span>Send</span> ↑</button>
@@ -41,12 +59,14 @@
         <aside class="settings-panel hidden" id="settingsPanel">
             <div class="settings-header"><div><h2>Settings</h2><p>Personalize your Nexora workspace.</p></div><button id="closeSettings" class="btn-icon" aria-label="Close settings">×</button></div>
             <section><h3>Appearance</h3><div class="setting-item"><label for="themeSelect">Theme</label><select id="themeSelect"><option value="dark">Dark mode</option><option value="light">Light mode</option><option value="system">System default</option></select></div><div class="setting-item"><label for="particleToggle">Particle background</label><input type="checkbox" id="particleToggle" checked></div></section>
+            <section><h3>AI</h3><div class="setting-item"><label for="providerSelect">AI provider</label><select id="providerSelect"><option value="gemini">Gemini</option><option value="openai">OpenAI</option></select></div><div class="setting-item"><label for="settingsModelSelect">AI model</label><select id="settingsModelSelect"></select></div></section>
             <section><h3>Chat</h3><div class="setting-item"><label for="enterToggle">Enter to send</label><input type="checkbox" id="enterToggle" checked></div><div class="setting-item"><label for="timestampToggle">Show timestamps</label><input type="checkbox" id="timestampToggle" checked></div><div class="setting-item"><label for="animationToggle">Message animations</label><input type="checkbox" id="animationToggle" checked></div><div class="setting-item"><label for="scrollToggle">Auto-scroll</label><input type="checkbox" id="scrollToggle" checked></div><div class="setting-item"><label for="streamToggle">Streaming responses</label><input type="checkbox" id="streamToggle" checked></div><div class="setting-item"><label for="styleSelect">Response style</label><select id="styleSelect"><option>Concise</option><option selected>Balanced</option><option>Detailed</option></select></div></section>
-            <section><h3>File settings</h3><p class="settings-note">Up to 10 MB each · PDF, TXT, DOC, DOCX, CSV, XLSX, JPG, PNG, WEBP</p><div class="setting-item"><label for="previewToggle">Automatic image previews</label><input type="checkbox" id="previewToggle" checked></div></section>
+            <section><h3>File settings</h3><p class="settings-note">Up to 100 MB each · PDF, TXT, DOC, DOCX, CSV, XLSX, JPG, PNG, WEBP</p><div class="setting-item"><label for="previewToggle">Automatic image previews</label><input type="checkbox" id="previewToggle" checked></div></section>
+            <section><h3>Account</h3><div class="account-summary"><img id="settingsAvatar" class="user-avatar" alt=""><div><strong id="settingsUserName">Nexora user</strong><small id="settingsUserEmail"></small></div></div><button id="settingsLogoutBtn" class="secondary-btn danger">Sign out</button></section>
             <section><h3>Privacy</h3><p class="settings-note">Your API key stays on the server. Uploaded files are processed for the current request and are not retained by this application.</p></section>
             <section class="chat-management"><h3>Chat management</h3><button id="clearChatBtn" class="secondary-btn">Clear current chat</button><button id="clearAllBtn" class="secondary-btn danger">Clear all local chats</button><button id="exportBtn" class="secondary-btn">Export chat</button></section>
         </aside>
     </div>
-    <script src="particles.js"></script><script src="script.js"></script><script src="settings.js"></script>
+    <script src="particles.js?v=3"></script><script src="settings.js?v=3"></script><script src="script.js?v=3"></script>
 </body>
 </html>

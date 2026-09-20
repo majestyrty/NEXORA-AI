@@ -16,6 +16,16 @@ window.NexoraSettings = { get: (key) => preferences[key] };
 function openSettings() { $("settingsPanel").classList.remove("hidden"); $("settingsOverlay").classList.remove("hidden"); requestAnimationFrame(() => $("settingsPanel").classList.add("visible")); }
 function closeSettings() { $("settingsPanel").classList.add("hidden"); $("settingsOverlay").classList.add("hidden"); }
 $("settingsBtn").onclick = openSettings; $("closeSettings").onclick = closeSettings; $("settingsOverlay").onclick = closeSettings;
+$("providerSelect").onchange = (event) => window.dispatchEvent(new CustomEvent("nexora-provider-change", { detail: event.target.value }));
+$("settingsModelSelect").onchange = (event) => { const select = document.getElementById("modelSelect"); select.value = event.target.value; select.dispatchEvent(new Event("change")); };
+$("settingsLogoutBtn").onclick = async () => {
+    if (!confirm("Sign out of Nexora AI?")) return;
+    const response = await fetch("/auth/logout", { method: "POST" });
+    if (response.ok) {
+        window.google?.accounts?.id.disableAutoSelect();
+        location.reload();
+    }
+};
 $("clearChatBtn").onclick = () => { document.getElementById("newChatBtn").click(); };
 $("clearAllBtn").onclick = () => { if (confirm("Clear all locally stored conversations? This cannot be undone.")) { localStorage.removeItem("nexora_chats"); location.reload(); } };
 $("exportBtn").onclick = () => { const messages = [...document.querySelectorAll(".message")].map((item) => item.innerText).join("\n\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([messages], { type: "text/plain" })); link.download = "nexora-chat.txt"; link.click(); URL.revokeObjectURL(link.href); };
