@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -9,72 +9,44 @@
 <body>
     <div class="app-shell">
         <aside class="sidebar" id="sidebar">
-            <div class="sidebar-header">
-                <h2>Conversations</h2>
-                <button id="openSettingsMobile" class="btn-icon" aria-label="Open settings">⚙</button>
-            </div>
-            <div id="convoList" class="convo-list">
-                <!-- conversation items will be populated here -->
+            <div class="sidebar-brand"><img src="logo.png" alt="" class="sidebar-logo"><strong>NEXORA AI</strong></div>
+            <button id="newChatBtn" class="new-chat">＋ New Chat</button>
+            <input id="searchChats" class="search-input" type="search" placeholder="Search conversations..." aria-label="Search conversations">
+            <div class="sidebar-label">Recent conversations</div>
+            <div id="convoList" class="convo-list"></div>
+            <div class="sidebar-footer">
+                <button id="settingsBtn" class="sidebar-action">⚙ Settings</button>
+                <button id="logoutBtn" class="sidebar-action">↪ Logout</button>
             </div>
         </aside>
-
-        <div class="container">
+        <main class="container">
             <header class="header">
-                <div class="brand-group">
-                    <img src="logo.png" alt="Nexora Logo" class="logo">
-                    <div>
-                        <h1>Nexora AI</h1>
-                        <p>Your intelligent assistant for fast, confident responses.</p>
-                    </div>
-                </div>
-                <button id="settingsBtn" class="btn-icon" aria-label="Open settings">⚙</button>
+                <button id="mobileMenuBtn" class="btn-icon mobile-only" aria-label="Open menu">☰</button>
+                <div class="brand-group"><img src="logo.png" alt="Nexora Logo" class="logo"><div><h1>Nexora AI</h1><p>Fast, thoughtful answers with your files in context.</p></div></div>
+                <label class="model-picker"> <span>Model</span><select id="modelSelect"></select></label>
             </header>
-
-            <div class="status-bar">
-                <span class="status-pill">Live chat</span>
-                <span class="status-pill">Pro answers in seconds</span>
-            </div>
-
-            <main class="chat-box" id="chat" role="log" aria-live="polite">
-                <article class="message bot">
-                    <strong>👋 Welcome to Nexora AI.</strong>
-                    <p>Ask anything, and Nexora will deliver polished, professional guidance instantly.</p>
-                </article>
-            </main>
-
+            <div class="status-bar"><span class="status-pill">● Live chat</span><span id="statusModel" class="status-pill">Gemini Flash</span></div>
+            <main class="chat-box" id="chat" role="log" aria-live="polite"></main>
             <footer class="input-area">
-                <label for="message" class="sr-only">Type your question</label>
-                <div class="input-group">
-                    <input id="message" type="text" placeholder="Ask Nexora AI anything..." autocomplete="off" spellcheck="false">
-                    <span class="hint">Press Enter or click Ask Nexora</span>
+                <div id="attachmentPreview" class="attachment-preview" aria-live="polite"></div>
+                <div class="composer-row">
+                    <button id="attachBtn" class="btn-icon" type="button" aria-label="Attach files">📎</button>
+                    <input id="fileInput" type="file" hidden multiple accept=".pdf,.txt,.doc,.docx,.csv,.xlsx,.jpg,.jpeg,.png,.webp,image/*">
+                    <div class="input-group"><label for="message" class="sr-only">Type your question</label><textarea id="message" rows="1" placeholder="Ask Nexora AI anything..." autocomplete="off" spellcheck="true"></textarea><span class="hint">Enter to send · Shift + Enter for a new line</span></div>
+                    <button type="button" id="sendBtn" class="send-button" disabled><span>Send</span> ↑</button>
                 </div>
-                <button type="button" id="sendBtn" class="send-button"><span>Ask Nexora</span></button>
             </footer>
-        </div>
-
+        </main>
         <div class="settings-overlay hidden" id="settingsOverlay"></div>
         <aside class="settings-panel hidden" id="settingsPanel">
-            <div class="settings-header">
-                <div>
-                    <h2>Settings</h2>
-                    <p>Adjust your interface preferences.</p>
-                </div>
-                <button id="closeSettings" class="btn-icon" aria-label="Close settings">×</button>
-            </div>
-            <div class="setting-item">
-                <label for="darkToggle">Dark mode</label>
-                <input type="checkbox" id="darkToggle" checked>
-            </div>
-            <div class="setting-item">
-                <label for="particleToggle">Particle background</label>
-                <input type="checkbox" id="particleToggle" checked>
-            </div>
-            <p class="settings-note">Preferences are saved for your next visit.</p>
+            <div class="settings-header"><div><h2>Settings</h2><p>Personalize your Nexora workspace.</p></div><button id="closeSettings" class="btn-icon" aria-label="Close settings">×</button></div>
+            <section><h3>Appearance</h3><div class="setting-item"><label for="themeSelect">Theme</label><select id="themeSelect"><option value="dark">Dark mode</option><option value="light">Light mode</option><option value="system">System default</option></select></div><div class="setting-item"><label for="particleToggle">Particle background</label><input type="checkbox" id="particleToggle" checked></div></section>
+            <section><h3>Chat</h3><div class="setting-item"><label for="enterToggle">Enter to send</label><input type="checkbox" id="enterToggle" checked></div><div class="setting-item"><label for="timestampToggle">Show timestamps</label><input type="checkbox" id="timestampToggle" checked></div><div class="setting-item"><label for="animationToggle">Message animations</label><input type="checkbox" id="animationToggle" checked></div><div class="setting-item"><label for="scrollToggle">Auto-scroll</label><input type="checkbox" id="scrollToggle" checked></div><div class="setting-item"><label for="streamToggle">Streaming responses</label><input type="checkbox" id="streamToggle" checked></div><div class="setting-item"><label for="styleSelect">Response style</label><select id="styleSelect"><option>Concise</option><option selected>Balanced</option><option>Detailed</option></select></div></section>
+            <section><h3>File settings</h3><p class="settings-note">Up to 10 MB each · PDF, TXT, DOC, DOCX, CSV, XLSX, JPG, PNG, WEBP</p><div class="setting-item"><label for="previewToggle">Automatic image previews</label><input type="checkbox" id="previewToggle" checked></div></section>
+            <section><h3>Privacy</h3><p class="settings-note">Your API key stays on the server. Uploaded files are processed for the current request and are not retained by this application.</p></section>
+            <section class="chat-management"><h3>Chat management</h3><button id="clearChatBtn" class="secondary-btn">Clear current chat</button><button id="clearAllBtn" class="secondary-btn danger">Clear all local chats</button><button id="exportBtn" class="secondary-btn">Export chat</button></section>
         </aside>
     </div>
-
-    <script src="particles.js"></script>
-    <script src="script.js"></script>
-    <script src="settings.js"></script>
+    <script src="particles.js"></script><script src="script.js"></script><script src="settings.js"></script>
 </body>
 </html>
