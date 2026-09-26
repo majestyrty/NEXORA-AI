@@ -28,6 +28,7 @@ const MAX_FILES = 5;
 const SESSION_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const SESSION_SECRET = process.env.SESSION_SECRET || "";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 const SessionStore = createMemoryStore(session);
 
@@ -116,17 +117,19 @@ const upload = multer({
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
-app.set("trust proxy", 1);
+app.set("trust proxy", IS_PRODUCTION ? 1 : false);
 app.use(session({
     name: "nexora.sid",
     secret: SESSION_SECRET || "development-session-secret-change-me",
     store: new SessionStore({ checkPeriod: 86400000 }),
     resave: false,
     saveUninitialized: false,
+    proxy: IS_PRODUCTION,
     cookie: {
         httpOnly: true,
         sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
+        secure: IS_PRODUCTION,
+        path: "/",
         maxAge: SESSION_MAX_AGE
     }
 }));
@@ -141,6 +144,9 @@ if (!SESSION_SECRET) {
 
 function requireAuth(req, res, next) {
     if (req.session.user) return next();
+    if (req.method === "GET") {
+        return res.redirect(`/?redirect=${encodeURIComponent(req.originalUrl)}`);
+    }
     return res.status(401).json({ error: "NOT_AUTHENTICATED", message: "Please sign in to continue." });
 }
 
@@ -340,6 +346,8 @@ function buildPrompt(message, files, responseStyle = "Balanced") {
 You are Nexora AI.
 
 Answer clearly, accurately and helpfully.
+
+If the user sends a brief greeting such as "hi" or "hello", reply with a brief, friendly greeting and invite them to ask what they need. Match the user's tone and answer the request directly without adding unrelated detail.
 
 If the user asks a school or technical problem:
 - Explain the important reasoning.
@@ -607,9 +615,19 @@ app.post("/auth/logout", (req, res) => {
             console.error("Session destruction error:", error);
             return res.status(500).json({ message: "Unable to sign you out. Please try again." });
         }
-        res.clearCookie("nexora.sid", { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
+        res.clearCookie("nexora.sid", { httpOnly: true, sameSite: "lax", secure: IS_PRODUCTION, path: "/" });
         return res.json({ authenticated: false });
     });
+});
+
+/*
+|--------------------------------------------------------------------------
+| CHAT PAGE
+|--------------------------------------------------------------------------
+*/
+
+app.get("/chat", requireAuth, (req, res) => {
+    return res.sendFile(path.join(__dirname, "index.html"));
 });
 
 /*
@@ -879,6 +897,7 @@ app.get("/config", (req, res) => {
 */
 
 app.get("/", (req, res) => {
+    if (req.session.user) return res.redirect("/chat");
     res.sendFile(
         path.join(
             __dirname,

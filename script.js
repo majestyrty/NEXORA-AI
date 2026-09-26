@@ -39,7 +39,7 @@ function renderAttachments() {
     });
 }
 function updateSendState() { sendBtn.disabled = state.sending || (!input.value.trim() && !state.files.length); }
-function setSending(value) { state.sending = value; sendBtn.disabled = value; sendBtn.innerHTML = value ? '<span class="spinner"></span>' : "<span>Send</span> ↑"; if (!value) updateSendState(); }
+function setSending(value) { state.sending = value; sendBtn.disabled = value; sendBtn.innerHTML = value ? '<span class="send-spinner" aria-hidden="true"></span>' : '<span class="send-icon" aria-hidden="true">↑</span>'; if (!value) updateSendState(); }
 function providerModelLabel() { const option = modelSelect.options[modelSelect.selectedIndex]; return `${state.provider === "openai" ? "OpenAI" : "Gemini"} · ${option?.text || ""}`; }
 function setUser(user) {
     state.user = user; const name = user.name || "Nexora user"; const avatar = user.picture || "";
@@ -49,46 +49,37 @@ function setUser(user) {
 }
 function showAuthScreen(message = "") { document.body.classList.add("auth-checking"); document.getElementById("authScreen").hidden = false; document.getElementById("authError").textContent = message; }
 function showApp() { document.body.classList.remove("auth-checking"); document.getElementById("authScreen").hidden = true; }
+function isChatPage() { return window.location.pathname === "/chat"; }
 function fetchWithTimeout(url, options = {}, timeout = 10000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
     return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
-async function continueAsGuest() {
-    const button = document.getElementById("guestSignIn");
-    button.disabled = true;
-    button.textContent = "Starting guest session…";
-    try {
-        const response = await fetchWithTimeout("/auth/guest", { method: "POST" });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.message || "Unable to start guest session.");
-        setUser(data.user);
-        button.disabled = false;
-        button.textContent = "Continue as Guest";
-        showApp();
-        renderConversations();
-        newChat();
-        try {
-            await loadConfig();
-        } catch (error) {
-            console.error("Configuration loading error:", error);
-        }
-    } catch (error) {
-        document.getElementById("authError").textContent = error.message;
-        button.disabled = false;
-        button.textContent = "Continue as Guest";
-    }
-    if (!document.getElementById("authScreen").hidden) {
-        button.disabled = false;
-        button.textContent = "Continue as Guest";
-    }
+async function enterApp(user) {
+    setUser(user);
+    await loadConfig();
+    showApp();
+    renderConversations();
+    newChat();
+}
+function redirectToChat() {
+    window.location.assign("/chat");
 }
 function renderGoogleButton() {
-    if (!state.config?.googleClientId || !window.google?.accounts?.id) return;
+    const button = document.getElementById("googleSignInButton");
+    if (!button) return;
+    if (!state.config?.googleClientId) {
+        button.disabled = true;
+        button.textContent = "Google sign-in unavailable";
+        return;
+    }
+    if (!window.google?.accounts?.id) return;
     window.google.accounts.id.initialize({ client_id: state.config.googleClientId, callback: async ({ credential }) => {
-        try { const response = await fetch("/auth/google", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credential }) }); const data = await response.json(); if (!response.ok) throw new Error(data.message); setUser(data.user); showApp(); await loadConfig(); } catch (error) { document.getElementById("authError").textContent = error.message || "Google authentication failed. Please try again."; }
+        try { const response = await fetch("/auth/google", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credential }) }); const data = await response.json(); if (!response.ok) throw new Error(data.message); redirectToChat(); } catch (error) { document.getElementById("authError").textContent = error.message || "Google authentication failed. Please try again."; }
     } });
-    const target = document.getElementById("googleSignIn"); target.innerHTML = ""; window.google.accounts.id.renderButton(target, { theme: "outline", size: "large", text: "signin_with", shape: "pill", width: 280 });
+    button.disabled = false;
+    button.textContent = "Log in";
+    button.onclick = () => window.google.accounts.id.prompt();
 }
 async function handleUnauthorized() { state.user = null; showAuthScreen("Your session expired. Please sign in again."); if (window.google?.accounts?.id) window.google.accounts.id.disableAutoSelect(); renderGoogleButton(); }
 async function loadConfig() {
@@ -107,7 +98,7 @@ async function sendMessage() {
     if (state.sending || (!input.value.trim() && !state.files.length)) return;
     const text = input.value.trim(); const files = [...state.files]; addMessage(text || "Please analyze these files.", "user", files); state.current.push({ text: text || "Please analyze these files.", sender: "user", time: timestamp() });
     input.value = ""; state.files = []; renderAttachments(); setSending(true);
-    const bot = document.createElement("article"); bot.className = "message bot"; bot.innerHTML = '<div class="message-meta">✦ Nexora AI</div><div class="message-content thinking">Thinking<span>.</span><span>.</span><span>.</span></div>'; chat.appendChild(bot);
+    const bot = document.createElement("article"); bot.className = "message bot"; bot.innerHTML = '<div class="message-meta">✦ Nexora AI</div><div class="message-content thinking" role="status" aria-label="Nexora AI is responding"><span></span><span></span><span></span></div>'; chat.appendChild(bot);
     try {
         let reply = "";
         const query = `message=${encodeURIComponent(text)}&provider=${encodeURIComponent(state.provider)}&model=${encodeURIComponent(modelSelect.value)}&responseStyle=${encodeURIComponent(window.NexoraSettings.get("responseStyle"))}`;
@@ -143,17 +134,28 @@ sendBtn.onclick = sendMessage; document.getElementById("newChatBtn").onclick = n
 document.getElementById("modelSelect").onchange = () => { localStorage.setItem("nexora_selected_model", modelSelect.value); document.getElementById("statusModel").textContent = providerModelLabel(); };
 window.addEventListener("nexora-provider-change", (event) => { state.provider = event.detail; populateModels(); });
 document.getElementById("logoutBtn").onclick = () => document.getElementById("settingsLogoutBtn").click();
-document.getElementById("guestSignIn").onclick = continueAsGuest;
+document.getElementById("googleSignInButton").onclick = () => {
+    document.getElementById("authError").textContent = "Google sign-in is still loading. Please try again.";
+};
 
 (async function init() {
     try {
         state.config = await fetch("/config").then((response) => response.json());
-        const session = await fetch("/auth/me");
+        let session;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            session = await fetch("/auth/me", { credentials: "same-origin", cache: "no-store" });
+            if (session.ok || attempt === 2) break;
+            await new Promise((resolve) => setTimeout(resolve, 250));
+        }
         if (!session.ok) {
+            if (isChatPage()) {
+                window.location.replace("/");
+                return;
+            }
             showAuthScreen(state.config.googleClientId ? "" : "Google sign-in is not configured on the server. Add GOOGLE_CLIENT_ID to .env.");
             const waitForGoogle = setInterval(() => { if (window.google?.accounts?.id) { clearInterval(waitForGoogle); renderGoogleButton(); } }, 100);
             return;
         }
-        const data = await session.json(); setUser(data.user); showApp(); await loadConfig(); renderConversations(); newChat();
+        const data = await session.json(); await enterApp(data.user);
     } catch (error) { showAuthScreen("Unable to connect to Nexora AI. Please refresh and try again."); }
 })();

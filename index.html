@@ -9,14 +9,12 @@
 </head>
 <body class="auth-checking">
     <section id="authScreen" class="auth-screen" hidden>
+        <button id="googleSignInButton" class="google-sign-in-button auth-login-button" type="button">Log in</button>
         <div class="auth-card">
             <img src="logo.png" alt="Nexora AI" class="auth-logo">
             <p class="eyebrow">NEXORA AI</p>
             <h1>Think Rightly. Create boldly.</h1>
             <p class="auth-copy">Sign in to keep your workspace secure and bring your conversations, files, and AI tools together.</p>
-            <button id="guestSignIn" class="guest-button" type="button">Continue as Guest</button>
-            <div class="auth-divider"><span>or</span></div>
-            <div id="googleSignIn" class="google-sign-in"></div>
             <p id="authError" class="auth-error" role="alert"></p>
         </div>
     </section>
@@ -40,7 +38,6 @@
             <header class="header">
                 <button id="mobileMenuBtn" class="btn-icon mobile-only" aria-label="Open menu">☰</button>
                 <div class="brand-group"><img src="logo.png" alt="Nexora Logo" class="logo"><div><h1>Nexora AI</h1><p>Fast, thoughtful answers with your files in context.</p></div></div>
-                <label class="model-picker"> <span>Model</span><select id="modelSelect"></select></label>
             </header>
             <div class="status-bar"><span class="status-pill">● Live chat</span><span id="statusModel" class="status-pill">Gemini Flash</span></div>
             <main class="chat-box" id="chat" role="log" aria-live="polite"></main>
@@ -51,14 +48,15 @@
                     <button id="attachBtn" class="btn-icon add-button" type="button" aria-label="Add files">+</button>
                     <input id="fileInput" type="file" hidden multiple accept=".pdf,.txt,.doc,.docx,.csv,.xlsx,.jpg,.jpeg,.png,.webp,image/*">
                     <div class="input-group"><label for="message" class="sr-only">Type your question</label><textarea id="message" rows="1" placeholder="Ask Nexora AI anything..." autocomplete="off" spellcheck="true"></textarea><span class="hint">Enter to send · Shift + Enter for a new line</span></div>
-                    <button type="button" id="sendBtn" class="send-button" disabled><span>Send</span> ↑</button>
+                    <label class="model-picker composer-model-picker"> <span>Model</span><select id="modelSelect"></select></label>
+                    <button type="button" id="sendBtn" class="send-button" aria-label="Send message" title="Send message" disabled><span class="send-icon" aria-hidden="true">↑</span></button>
                 </div>
             </footer>
         </main>
         <div class="settings-overlay hidden" id="settingsOverlay"></div>
         <aside class="settings-panel hidden" id="settingsPanel">
             <div class="settings-header"><div><h2>Settings</h2><p>Personalize your Nexora workspace.</p></div><button id="closeSettings" class="btn-icon" aria-label="Close settings">×</button></div>
-            <section><h3>Appearance</h3><div class="setting-item"><label for="themeSelect">Theme</label><select id="themeSelect"><option value="dark">Dark mode</option><option value="light">Light mode</option><option value="system">System default</option></select></div><div class="setting-item"><label for="particleToggle">Particle background</label><input type="checkbox" id="particleToggle" checked></div></section>
+            <section><h3>Appearance</h3><div class="setting-item"><label for="themeSelect">Theme</label><select id="themeSelect"><option value="dark">Midnight</option><option value="aurora">Aurora</option><option value="graphite">Graphite</option><option value="light">Light mode</option><option value="system">System default</option></select></div><div class="setting-item"><label for="accentSelect">Accent color</label><select id="accentSelect"><option value="blue">Blue</option><option value="red">Red</option><option value="black">Black</option><option value="purple">Purple</option><option value="green">Green</option><option value="orange">Orange</option></select></div><div class="setting-item"><label for="particleToggle">Particle background</label><input type="checkbox" id="particleToggle" checked></div></section>
             <section><h3>AI</h3><div class="setting-item"><label for="providerSelect">AI provider</label><select id="providerSelect"><option value="gemini">Gemini</option><option value="openai">OpenAI</option></select></div><div class="setting-item"><label for="settingsModelSelect">AI model</label><select id="settingsModelSelect"></select></div></section>
             <section><h3>Chat</h3><div class="setting-item"><label for="enterToggle">Enter to send</label><input type="checkbox" id="enterToggle" checked></div><div class="setting-item"><label for="timestampToggle">Show timestamps</label><input type="checkbox" id="timestampToggle" checked></div><div class="setting-item"><label for="animationToggle">Message animations</label><input type="checkbox" id="animationToggle" checked></div><div class="setting-item"><label for="scrollToggle">Auto-scroll</label><input type="checkbox" id="scrollToggle" checked></div><div class="setting-item"><label for="streamToggle">Streaming responses</label><input type="checkbox" id="streamToggle" checked></div><div class="setting-item"><label for="styleSelect">Response style</label><select id="styleSelect"><option>Concise</option><option selected>Balanced</option><option>Detailed</option></select></div></section>
             <section><h3>File settings</h3><p class="settings-note">Up to 100 MB each · PDF, TXT, DOC, DOCX, CSV, XLSX, JPG, PNG, WEBP</p><div class="setting-item"><label for="previewToggle">Automatic image previews</label><input type="checkbox" id="previewToggle" checked></div></section>
