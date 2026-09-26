@@ -4,17 +4,28 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nexora AI</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=4">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body class="auth-checking">
     <section id="authScreen" class="auth-screen" hidden>
-        <button id="googleSignInButton" class="google-sign-in-button auth-login-button" type="button">Log in</button>
         <div class="auth-card">
             <img src="logo.png" alt="Nexora AI" class="auth-logo">
             <p class="eyebrow">NEXORA AI</p>
-            <h1>Think Rightly. Create boldly.</h1>
-            <p class="auth-copy">Sign in to keep your workspace secure and bring your conversations, files, and AI tools together.</p>
+            <h1 id="welcomeHeadline" aria-label="Think Rightly. Create boldly.">Think Rightly. Create boldly.</h1>
+            <p class="auth-copy" id="authCopy">Sign in to bring your conversations, files, and AI tools together.</p>
+            <div class="auth-mode-switch" role="group" aria-label="Choose account action">
+                <button id="loginModeButton" class="auth-mode-button active" type="button" aria-pressed="true">Log in</button>
+                <button id="signupModeButton" class="auth-mode-button" type="button" aria-pressed="false">Sign up</button>
+            </div>
+            <div id="signupFields" class="signup-fields" hidden>
+                <label for="signupName">Your name</label>
+                <input id="signupName" name="name" type="text" maxlength="80" autocomplete="name" placeholder="Enter your name">
+                <label for="signupAge">Your age</label>
+                <input id="signupAge" name="age" type="number" min="1" max="120" inputmode="numeric" placeholder="Enter your age">
+                <p class="signup-privacy">Your age is used to tailor responses and kept in your active sign-in session.</p>
+            </div>
+            <button id="googleSignInButton" class="google-sign-in-button auth-submit-button" type="button">Continue with Google</button>
             <p id="authError" class="auth-error" role="alert"></p>
         </div>
     </section>
@@ -65,6 +76,6 @@
             <section class="chat-management"><h3>Chat management</h3><button id="clearChatBtn" class="secondary-btn">Clear current chat</button><button id="clearAllBtn" class="secondary-btn danger">Clear all local chats</button><button id="exportBtn" class="secondary-btn">Export chat</button></section>
         </aside>
     </div>
-    <script src="particles.js?v=3"></script><script src="settings.js?v=3"></script><script src="script.js?v=3"></script>
+    <script src="particles.js?v=3"></script><script src="settings.js?v=3"></script><script src="script.js?v=4"></script>
 </body>
 </html>

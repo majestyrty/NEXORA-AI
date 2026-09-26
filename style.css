@@ -119,6 +119,27 @@ body:not(.auth-checking) .chat-box {
 .composer-model-picker{flex:0 0 180px}
 @media(max-width:760px){.composer-model-picker{flex-basis:132px}.composer-model-picker select{min-width:0;padding-left:8px;padding-right:8px}}
 
+/* Animated welcome wallpaper and accessible sign-in/sign-up controls. */
+.auth-screen{isolation:isolate;overflow:auto;background:rgba(5,8,22,.84)}
+.auth-screen::before{content:"";position:absolute;inset:-30%;z-index:-1;pointer-events:none;background:radial-gradient(ellipse at 18% 28%,color-mix(in srgb,var(--accent) 34%,transparent),transparent 36%),radial-gradient(ellipse at 82% 70%,rgba(249,115,22,.25),transparent 34%),linear-gradient(125deg,#07111f,#11112b,#082b37,#101427);background-size:180% 180%;animation:welcome-wallpaper 18s ease-in-out infinite alternate}
+.app-shell::before{content:"";position:fixed;inset:-20%;z-index:-1;pointer-events:none;background:radial-gradient(ellipse at 15% 20%,color-mix(in srgb,var(--accent) 22%,transparent),transparent 38%),radial-gradient(ellipse at 85% 78%,rgba(249,115,22,.13),transparent 38%),linear-gradient(125deg,var(--bg),#11112b,var(--surface));background-size:180% 180%;animation:welcome-wallpaper 24s ease-in-out infinite alternate}
+@keyframes welcome-wallpaper{from{transform:translate3d(-2%,1%,0) scale(1);background-position:0% 50%}to{transform:translate3d(2%,-1%,0) scale(1.08);background-position:100% 50%}}
+.auth-card{width:min(480px,100%);max-height:calc(100vh - 32px);overflow:auto;padding:clamp(26px,5vh,42px) clamp(22px,6vw,38px);backdrop-filter:blur(18px);background:rgba(12,20,38,.86)}
+.auth-card h1{min-height:2.35em}
+.auth-card h1.typing::after{content:"";display:inline-block;width:2px;height:.9em;margin-left:5px;vertical-align:-.06em;background:var(--accent);animation:type-caret .8s steps(2,start) infinite}
+@keyframes type-caret{to{visibility:hidden}}
+.auth-mode-switch{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin:0 auto 18px;padding:4px;max-width:300px;border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.04)}
+.auth-mode-button{padding:10px;border:0;border-radius:10px;background:transparent;color:var(--muted);font-weight:700}
+.auth-mode-button.active{background:var(--accent-strong);color:#fff}
+.signup-fields{display:grid;gap:8px;margin:0 auto 16px;text-align:left}
+.signup-fields[hidden]{display:none}
+.signup-fields label{font-size:.85rem;font-weight:650;color:var(--text)}
+.signup-fields input{background:rgba(4,10,24,.72);color:var(--text)}
+.signup-privacy{margin:0;color:var(--muted);font-size:.75rem;line-height:1.45}
+.auth-submit-button{display:block;margin:0 auto}
+.auth-error{margin:12px 0 0}
+@media(prefers-reduced-motion:reduce){.auth-screen::before,.app-shell::before{animation:none}.auth-card h1.typing::after{animation:none}}
+
 /* Cohesive themes, compact composer controls, and a dark native-feeling scrollbar. */
 body[data-theme="aurora"]{--bg:#07111f;--panel:rgba(11,25,43,.96);--surface:#0c1b2c;--card:#122b40;--input:#091827;--border:rgba(103,232,249,.2);--text:#ecfeff;--muted:#9fb9c7}
 body[data-theme="graphite"]{--bg:#101113;--panel:rgba(25,26,29,.97);--surface:#1c1d20;--card:#292a2e;--input:#151619;--border:rgba(203,213,225,.16);--text:#f4f4f5;--muted:#a1a1aa}

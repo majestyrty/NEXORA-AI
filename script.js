@@ -4,7 +4,7 @@ const sendBtn = document.getElementById("sendBtn");
 const fileInput = document.getElementById("fileInput");
 const attachmentPreview = document.getElementById("attachmentPreview");
 const modelSelect = document.getElementById("modelSelect");
-const state = { files: [], conversations: JSON.parse(localStorage.getItem("nexora_chats") || "[]"), current: [], sending: false, config: null, user: null, provider: "gemini" };
+const state = { files: [], conversations: JSON.parse(localStorage.getItem("nexora_chats") || "[]"), current: [], sending: false, config: null, user: null, provider: "gemini", authMode: "login", pendingSignup: null, headlineTimer: null };
 
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[char]));
 function formatText(text) { return escapeHtml(text).replace(/```([\s\S]*?)```/g, "<pre><code>$1</code></pre>").replace(/^### (.*)$/gm, "<h3>$1</h3>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br>"); }
@@ -47,8 +47,23 @@ function setUser(user) {
     ["userEmail", "settingsUserEmail"].forEach((id) => document.getElementById(id).textContent = user.email || "");
     ["userAvatar", "settingsAvatar"].forEach((id) => { const image = document.getElementById(id); image.src = avatar || "logo.png"; image.alt = `${name} profile`; });
 }
-function showAuthScreen(message = "") { document.body.classList.add("auth-checking"); document.getElementById("authScreen").hidden = false; document.getElementById("authError").textContent = message; }
+function showAuthScreen(message = "") { document.body.classList.add("auth-checking"); document.getElementById("authScreen").hidden = false; document.getElementById("authError").textContent = message; animateWelcomeHeadline(); }
 function showApp() { document.body.classList.remove("auth-checking"); document.getElementById("authScreen").hidden = true; }
+function animateWelcomeHeadline() {
+    const headline = document.getElementById("welcomeHeadline");
+    if (!headline || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const title = "Think Rightly. Create boldly.";
+    clearTimeout(state.headlineTimer);
+    headline.classList.add("typing");
+    headline.textContent = "";
+    let index = 0;
+    const typeNext = () => {
+        headline.textContent = title.slice(0, ++index);
+        if (index < title.length) state.headlineTimer = setTimeout(typeNext, 48);
+        else headline.classList.remove("typing");
+    };
+    typeNext();
+}
 function isChatPage() { return window.location.pathname === "/chat"; }
 function fetchWithTimeout(url, options = {}, timeout = 10000) {
     const controller = new AbortController();
@@ -75,11 +90,38 @@ function renderGoogleButton() {
     }
     if (!window.google?.accounts?.id) return;
     window.google.accounts.id.initialize({ client_id: state.config.googleClientId, callback: async ({ credential }) => {
-        try { const response = await fetch("/auth/google", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credential }) }); const data = await response.json(); if (!response.ok) throw new Error(data.message); redirectToChat(); } catch (error) { document.getElementById("authError").textContent = error.message || "Google authentication failed. Please try again."; }
+        try {
+            const signup = state.pendingSignup || undefined;
+            const response = await fetch("/auth/google", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credential, signup }) });
+            const data = await response.json(); if (!response.ok) throw new Error(data.message); state.pendingSignup = null; redirectToChat();
+        } catch (error) { document.getElementById("authError").textContent = error.message || "Google authentication failed. Please try again."; }
     } });
     button.disabled = false;
-    button.textContent = "Log in";
-    button.onclick = () => window.google.accounts.id.prompt();
+    button.onclick = beginGoogleSignIn;
+}
+function setAuthMode(mode) {
+    state.authMode = mode;
+    const signingUp = mode === "signup";
+    document.getElementById("signupFields").hidden = !signingUp;
+    document.getElementById("loginModeButton").classList.toggle("active", !signingUp);
+    document.getElementById("signupModeButton").classList.toggle("active", signingUp);
+    document.getElementById("loginModeButton").setAttribute("aria-pressed", String(!signingUp));
+    document.getElementById("signupModeButton").setAttribute("aria-pressed", String(signingUp));
+    document.getElementById("authCopy").textContent = signingUp ? "Create your Nexora account and personalize your AI experience." : "Sign in to bring your conversations, files, and AI tools together.";
+    document.getElementById("googleSignInButton").textContent = signingUp ? "Sign up with Google" : "Continue with Google";
+    document.getElementById("authError").textContent = "";
+}
+function beginGoogleSignIn() {
+    state.pendingSignup = null;
+    if (state.authMode === "signup") {
+        const name = document.getElementById("signupName").value.trim();
+        const age = Number(document.getElementById("signupAge").value);
+        if (!name || name.length > 80) { document.getElementById("authError").textContent = "Enter your name (up to 80 characters) to sign up."; document.getElementById("signupName").focus(); return; }
+        if (!Number.isInteger(age) || age < 1 || age > 120) { document.getElementById("authError").textContent = "Enter a valid age between 1 and 120 to sign up."; document.getElementById("signupAge").focus(); return; }
+        state.pendingSignup = { name, age };
+    }
+    if (!window.google?.accounts?.id) { document.getElementById("authError").textContent = "Google sign-in is still loading. Please try again."; return; }
+    window.google.accounts.id.prompt();
 }
 async function handleUnauthorized() { state.user = null; showAuthScreen("Your session expired. Please sign in again."); if (window.google?.accounts?.id) window.google.accounts.id.disableAutoSelect(); renderGoogleButton(); }
 async function loadConfig() {
@@ -134,9 +176,9 @@ sendBtn.onclick = sendMessage; document.getElementById("newChatBtn").onclick = n
 document.getElementById("modelSelect").onchange = () => { localStorage.setItem("nexora_selected_model", modelSelect.value); document.getElementById("statusModel").textContent = providerModelLabel(); };
 window.addEventListener("nexora-provider-change", (event) => { state.provider = event.detail; populateModels(); });
 document.getElementById("logoutBtn").onclick = () => document.getElementById("settingsLogoutBtn").click();
-document.getElementById("googleSignInButton").onclick = () => {
-    document.getElementById("authError").textContent = "Google sign-in is still loading. Please try again.";
-};
+document.getElementById("loginModeButton").onclick = () => setAuthMode("login");
+document.getElementById("signupModeButton").onclick = () => setAuthMode("signup");
+document.getElementById("googleSignInButton").onclick = beginGoogleSignIn;
 
 (async function init() {
     try {

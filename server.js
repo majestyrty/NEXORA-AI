@@ -341,11 +341,19 @@ async function extractFile(file) {
 |--------------------------------------------------------------------------
 */
 
-function buildPrompt(message, files, responseStyle = "Balanced") {
+function buildPrompt(message, files, responseStyle = "Balanced", audienceAge = null) {
+    const ageGuidance = Number.isInteger(audienceAge)
+        ? audienceAge < 13
+            ? "The user's self-reported age is under 13. Use simple, age-appropriate language, protect their privacy, and keep examples and guidance suitable for a young child."
+            : audienceAge < 18
+                ? "The user's self-reported age is 13 to 17. Use age-appropriate language and examples, protect their privacy, and give supportive, safe guidance."
+                : "The user's self-reported age is 18 or older. Use clear adult-level language while maintaining standard safety and privacy protections."
+        : "The user's age is unknown. Keep responses suitable for a general audience.";
     let prompt = `
 You are Nexora AI.
 
 Answer clearly, accurately and helpfully.
+${ageGuidance}
 
 If the user sends a brief greeting such as "hi" or "hello", reply with a brief, friendly greeting and invite them to ask what they need. Match the user's tone and answer the request directly without adding unrelated detail.
 
@@ -383,14 +391,16 @@ ${file.text.slice(0, 120000)}
 function buildGeminiContents(
     message,
     files,
-    responseStyle = "Balanced"
+    responseStyle = "Balanced",
+    audienceAge = null
 ) {
     const parts = [
         {
             text: buildPrompt(
                 message,
                 files,
-                responseStyle
+                responseStyle,
+                audienceAge
             )
         }
     ];
@@ -423,7 +433,8 @@ function buildGeminiContents(
 function buildOpenAIInput(
     message,
     files,
-    responseStyle = "Balanced"
+    responseStyle = "Balanced",
+    audienceAge = null
 ) {
     const content = [
         {
@@ -431,7 +442,8 @@ function buildOpenAIInput(
             text: buildPrompt(
                 message,
                 files,
-                responseStyle
+                responseStyle,
+                audienceAge
             )
         }
     ];
@@ -469,7 +481,8 @@ async function generateGeminiResponse(
     message,
     model,
     files,
-    responseStyle
+    responseStyle,
+    audienceAge
 ) {
     if (!gemini) {
         throw new Error("GEMINI_API_KEY is not configured.");
@@ -480,7 +493,8 @@ async function generateGeminiResponse(
         contents: buildGeminiContents(
             message,
             files,
-            responseStyle
+            responseStyle,
+            audienceAge
         )
     });
 
@@ -500,7 +514,8 @@ async function generateOpenAIResponse(
     message,
     model,
     files,
-    responseStyle
+    responseStyle,
+    audienceAge
 ) {
     if (!openai) {
         throw new Error("OPENAI_API_KEY is not configured.");
@@ -511,7 +526,8 @@ async function generateOpenAIResponse(
         input: buildOpenAIInput(
             message,
             files,
-            responseStyle
+            responseStyle,
+            audienceAge
         )
     });
 
@@ -532,14 +548,16 @@ async function generateResponse(
     message,
     model,
     files = [],
-    responseStyle
+    responseStyle,
+    audienceAge
 ) {
     if (provider === "openai") {
         return generateOpenAIResponse(
             message,
             model,
             files,
-            responseStyle
+            responseStyle,
+            audienceAge
         );
     }
 
@@ -547,7 +565,8 @@ async function generateResponse(
         message,
         model,
         files,
-        responseStyle
+        responseStyle,
+        audienceAge
     );
 }
 
@@ -568,11 +587,22 @@ app.post("/auth/google", async (req, res) => {
         const ticket = await googleClient.verifyIdToken({ idToken: credential, audience: GOOGLE_CLIENT_ID });
         const payload = ticket.getPayload();
         if (!payload?.sub || !payload.email) return res.status(401).json({ message: "Google authentication could not be verified." });
+        const signup = req.body?.signup;
+        let signupName = "";
+        let signupAge = null;
+        if (signup !== undefined) {
+            signupName = typeof signup.name === "string" ? signup.name.trim() : "";
+            signupAge = Number(signup.age);
+            if (!signupName || signupName.length > 80 || !Number.isInteger(signupAge) || signupAge < 1 || signupAge > 120) {
+                return res.status(400).json({ message: "Please provide a name and a valid age between 1 and 120." });
+            }
+        }
         req.session.user = {
             sub: payload.sub,
-            name: payload.name || payload.email.split("@")[0],
+            name: signupName || payload.name || payload.email.split("@")[0],
             email: payload.email,
-            picture: payload.picture || ""
+            picture: payload.picture || "",
+            age: signupAge
         };
         return req.session.save((error) => {
             if (error) {
@@ -676,7 +706,8 @@ app.post(
                 message,
                 model,
                 files,
-                req.body.responseStyle
+                req.body.responseStyle,
+                req.session.user?.age ?? null
             );
 
             res.json({
@@ -771,7 +802,8 @@ app.get("/stream", requireAuth, async (req, res) => {
                     input: buildOpenAIInput(
                         message,
                         [],
-                        req.query.responseStyle
+                        req.query.responseStyle,
+                        req.session.user?.age ?? null
                     ),
                     stream: true
                 });
@@ -817,7 +849,8 @@ app.get("/stream", requireAuth, async (req, res) => {
                 contents: buildGeminiContents(
                     message,
                     [],
-                    req.query.responseStyle
+                    req.query.responseStyle,
+                    req.session.user?.age ?? null
                 )
             });
 
