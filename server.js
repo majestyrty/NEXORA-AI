@@ -34,6 +34,7 @@ const ALLOW_GUEST_ACCESS = process.env.ALLOW_GUEST_ACCESS === "true";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const PUBLIC_DIR = path.join(__dirname, "public");
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const MAX_FILES = 3;
@@ -294,7 +295,7 @@ const publicFilePaths = new Set([
     "/particles.js",
     "/logo.png"
 ]);
-const servePublicFiles = express.static(__dirname, {
+const servePublicFiles = express.static(PUBLIC_DIR, {
     dotfiles: "deny",
     index: false,
     fallthrough: true
@@ -1273,7 +1274,7 @@ app.post("/auth/logout", authRateLimit, (req, res) => {
 */
 
 app.get("/chat", requireAuth, (req, res) => {
-    return res.sendFile(path.join(__dirname, "index.html"));
+    return res.sendFile(path.join(PUBLIC_DIR, "index.html"));
 });
 
 /*
@@ -1825,10 +1826,7 @@ app.post("/api/checkout/verify", verifyRateLimit, requireAuth, async (req, res) 
 app.get("/", (req, res) => {
     if (req.session.user) return res.redirect("/chat");
     res.sendFile(
-        path.join(
-            __dirname,
-            "index.html"
-        )
+        path.join(PUBLIC_DIR, "index.html")
     );
 });
 
