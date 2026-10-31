@@ -1559,7 +1559,12 @@ app.get("/api/health", publicApiRateLimit, (req, res) => {
         status: "ok",
         environment: IS_PRODUCTION ? "production" : "development",
         sessionSecretConfigured: SESSION_SECRET_CONFIGURED,
-        paymentProviderConfigured: Boolean(PAYSTACK_SECRET_KEY)
+        paymentProviderConfigured: Boolean(PAYSTACK_SECRET_KEY),
+        providers: {
+            gemini: Boolean(process.env.GEMINI_API_KEY),
+            openai: Boolean(process.env.OPENAI_API_KEY),
+            googleSignIn: Boolean(GOOGLE_CLIENT_ID)
+        }
     });
 });
 
