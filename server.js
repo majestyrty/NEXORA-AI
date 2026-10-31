@@ -7,6 +7,7 @@ import crypto from "crypto";
 import { fileURLToPath } from "url";
 import multer from "multer";
 import mammoth from "mammoth";
+import "@napi-rs/canvas";
 import { PDFParse } from "pdf-parse";
 import ExcelJS from "exceljs";
 import { fileTypeFromBuffer } from "file-type";
@@ -293,7 +294,8 @@ const publicFilePaths = new Set([
     "/settings.js",
     "/script.js",
     "/particles.js",
-    "/logo.png"
+    "/logo.png",
+    "/favicon.svg"
 ]);
 const servePublicFiles = express.static(PUBLIC_DIR, {
     dotfiles: "deny",
