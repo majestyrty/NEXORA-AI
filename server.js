@@ -1,5 +1,4 @@
 import express from "express";
-import cors from "cors";
 import dotenv from "dotenv";
 import session from "express-session";
 import createMemoryStore from "memorystore";
@@ -19,18 +18,39 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const DEPLOYMENT_HOST = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+const DEFAULT_APP_BASE_URL = DEPLOYMENT_HOST
+    ? `https://${DEPLOYMENT_HOST}`
+    : `http://localhost:${PORT}`;
+const APP_BASE_URL = (process.env.APP_BASE_URL || DEFAULT_APP_BASE_URL).replace(/\/$/, "");
+const APP_ORIGIN = new URL(APP_BASE_URL).origin;
+const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || "";
+const ALLOW_GUEST_ACCESS = process.env.ALLOW_GUEST_ACCESS === "true";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const MAX_FILE_SIZE = 100 * 1024 * 1024;
-const MAX_FILES = 5;
+const MAX_FILE_SIZE = 20 * 1024 * 1024;
+const MAX_FILES = 3;
+const MAX_MESSAGE_LENGTH = 20000;
 const SESSION_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || "";
+const MICROSOFT_CLIENT_SECRET = process.env.MICROSOFT_CLIENT_SECRET || "";
+const MICROSOFT_TENANT = process.env.MICROSOFT_TENANT || "common";
+const MICROSOFT_AUTHORITY = `https://login.microsoftonline.com/${encodeURIComponent(MICROSOFT_TENANT)}`;
 const SESSION_SECRET = process.env.SESSION_SECRET || "";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 const SessionStore = createMemoryStore(session);
+const SESSION_COOKIE_NAME = IS_PRODUCTION ? "__Host-nexora.sid" : "nexora.sid";
+
+if (IS_PRODUCTION && (!SESSION_SECRET || Buffer.byteLength(SESSION_SECRET) < 32)) {
+    throw new Error("Production requires SESSION_SECRET to be set to a secret with at least 32 bytes in the deployment environment.");
+}
+if (IS_PRODUCTION && new URL(APP_BASE_URL).protocol !== "https:") {
+    throw new Error("Production requires APP_BASE_URL to use HTTPS.");
+}
 
 /*
 |--------------------------------------------------------------------------
@@ -81,6 +101,7 @@ const PRICING_COUNTRIES = {
     GB: { name: "United Kingdom", currency: "GBP" },
     US: { name: "United States", currency: "USD" }
 };
+const PAYSTACK_SUPPORTED_CURRENCIES = new Set(["GHS", "KES", "NGN", "USD", "ZAR"]);
 let exchangeRateCache = null;
 
 async function getUsdExchangeRates() {
@@ -173,12 +194,83 @@ const upload = multer({
     }
 });
 
-app.use(cors());
-app.use(express.json({ limit: "1mb" }));
 app.set("trust proxy", IS_PRODUCTION ? 1 : false);
+app.disable("x-powered-by");
+const rateLimitBuckets = new Map();
+function rateLimit({ windowMs, max, name }) {
+    return (req, res, next) => {
+        const now = Date.now();
+        const key = `${name}:${req.ip || req.socket.remoteAddress || "unknown"}`;
+        let bucket = rateLimitBuckets.get(key);
+        if (!bucket || bucket.resetAt <= now) {
+            bucket = { count: 0, resetAt: now + windowMs };
+            rateLimitBuckets.set(key, bucket);
+        }
+        bucket.count += 1;
+        res.setHeader("RateLimit-Limit", max);
+        res.setHeader("RateLimit-Remaining", Math.max(0, max - bucket.count));
+        res.setHeader("RateLimit-Reset", Math.ceil(bucket.resetAt / 1000));
+        if (bucket.count > max) {
+            res.setHeader("Retry-After", Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)));
+            return res.status(429).json({ message: "Too many requests. Please wait and try again." });
+        }
+        if (rateLimitBuckets.size > 10000 && bucket.count % 128 === 1) {
+            for (const [bucketKey, entry] of rateLimitBuckets) {
+                if (entry.resetAt <= now) rateLimitBuckets.delete(bucketKey);
+            }
+        }
+        return next();
+    };
+}
+
+const authRateLimit = rateLimit({ name: "auth", windowMs: 15 * 60 * 1000, max: 20 });
+const chatRateLimit = rateLimit({ name: "chat", windowMs: 10 * 60 * 1000, max: 20 });
+const paymentRateLimit = rateLimit({ name: "payment", windowMs: 15 * 60 * 1000, max: 10 });
+const verifyRateLimit = rateLimit({ name: "verify", windowMs: 15 * 60 * 1000, max: 30 });
+const publicApiRateLimit = rateLimit({ name: "public-api", windowMs: 60 * 1000, max: 120 });
+const pricingRateLimit = rateLimit({ name: "pricing", windowMs: 60 * 1000, max: 60 });
+
+app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+    res.setHeader("Content-Security-Policy", [
+        "default-src 'self'",
+        "base-uri 'self'",
+        "object-src 'none'",
+        "frame-ancestors 'none'",
+        "form-action 'self' https://accounts.google.com",
+        "script-src 'self' https://accounts.google.com",
+        "style-src 'self' 'unsafe-inline' https://accounts.google.com",
+        "img-src 'self' data: blob: https://*.googleusercontent.com",
+        "font-src 'self' data:",
+        "connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com",
+        "frame-src https://accounts.google.com",
+        ...(IS_PRODUCTION ? ["upgrade-insecure-requests"] : [])
+    ].join("; "));
+    if (IS_PRODUCTION) {
+        res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
+    if (req.path.startsWith("/auth/") || req.path.startsWith("/api/") ||
+        req.path === "/chat" || req.path === "/stream") {
+        res.setHeader("Cache-Control", "no-store");
+    }
+    if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+        const origin = req.get("origin");
+        const fetchSite = req.get("sec-fetch-site");
+        if ((origin && origin !== APP_ORIGIN) || fetchSite === "cross-site") {
+            return res.status(403).json({ message: "Cross-origin requests are not allowed." });
+        }
+    }
+    return next();
+});
+
+app.use(express.json({ limit: "32kb" }));
 app.use(session({
-    name: "nexora.sid",
-    secret: SESSION_SECRET || "development-session-secret-change-me",
+    name: SESSION_COOKIE_NAME,
+    secret: SESSION_SECRET || crypto.randomBytes(32).toString("hex"),
     store: new SessionStore({ checkPeriod: 86400000 }),
     resave: false,
     saveUninitialized: false,
@@ -191,13 +283,34 @@ app.use(session({
         maxAge: SESSION_MAX_AGE
     }
 }));
-app.use(express.static(__dirname));
+const publicFilePaths = new Set([
+    "/index.html",
+    "/style.css",
+    "/settings.js",
+    "/script.js",
+    "/particles.js",
+    "/logo.png"
+]);
+const servePublicFiles = express.static(__dirname, {
+    dotfiles: "deny",
+    index: false,
+    fallthrough: true
+});
+app.use((req, res, next) => {
+    if (["GET", "HEAD"].includes(req.method) && publicFilePaths.has(req.path)) {
+        return servePublicFiles(req, res, next);
+    }
+    return next();
+});
 
 if (!GOOGLE_CLIENT_ID) {
     console.warn("GOOGLE_CLIENT_ID is not configured. Google sign-in is unavailable.");
 }
 if (!SESSION_SECRET) {
-    console.warn("SESSION_SECRET is not configured. Set it before production use.");
+    console.warn("SESSION_SECRET is not configured. A temporary random development secret will be used.");
+}
+if (IS_PRODUCTION) {
+    console.warn("Use a persistent shared session store in production; the configured in-memory store is for development only.");
 }
 
 function requireAuth(req, res, next) {
@@ -206,6 +319,86 @@ function requireAuth(req, res, next) {
         return res.redirect(`/?redirect=${encodeURIComponent(req.originalUrl)}`);
     }
     return res.status(401).json({ error: "NOT_AUTHENTICATED", message: "Please sign in to continue." });
+}
+
+function regenerateSession(req) {
+    return new Promise((resolve, reject) => {
+        req.session.regenerate((error) => {
+            if (error) return reject(error);
+            return resolve();
+        });
+    });
+}
+
+const emailAccounts = new Map();
+const pendingEmailAuthentications = new Map();
+
+function normalizeEmailAddress(value) {
+    return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function isValidEmail(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value || "");
+}
+
+function hashPassword(password) {
+    const salt = crypto.randomBytes(16).toString("hex");
+    const hashed = crypto.pbkdf2Sync(password, salt, 200000, 32, "sha256");
+    return `${salt}:${hashed.toString("hex")}`;
+}
+
+function verifyPassword(password, storedValue) {
+    if (typeof password !== "string" || typeof storedValue !== "string") {
+        return false;
+    }
+
+    const separatorIndex = storedValue.indexOf(":");
+    if (separatorIndex <= 0 || separatorIndex === storedValue.length - 1) {
+        return false;
+    }
+
+    const salt = storedValue.slice(0, separatorIndex);
+    const expectedHex = storedValue.slice(separatorIndex + 1);
+    const candidateHex = crypto.pbkdf2Sync(password, salt, 200000, 32, "sha256").toString("hex");
+
+    try {
+        return crypto.timingSafeEqual(
+            Buffer.from(expectedHex, "hex"),
+            Buffer.from(candidateHex, "hex")
+        );
+    } catch (error) {
+        return false;
+    }
+}
+
+function generateOtpCode() {
+    return crypto.randomInt(100000, 1000000).toString().padStart(6, "0");
+}
+
+function createPendingEmailAuth(email, payload) {
+    const code = generateOtpCode();
+    const entry = {
+        ...payload,
+        email,
+        codeHash: crypto.createHash("sha256").update(code).digest("hex"),
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 10 * 60 * 1000
+    };
+    pendingEmailAuthentications.set(email, entry);
+    console.log(`[Nexora OTP] ${email}: ${code}`);
+    return code;
+}
+
+function getUserFromEmailAccount(account) {
+    if (!account || typeof account !== "object") return null;
+    return {
+        sub: `email:${account.email}`,
+        name: account.name || account.email.split("@")[0],
+        email: account.email,
+        picture: "",
+        age: account.age ?? null,
+        isEmailUser: true
+    };
 }
 
 /*
@@ -644,7 +837,7 @@ async function generateResponse(
 | In Google Cloud Console, authorize http://localhost:3000 as an
 | authorized JavaScript origin for local development.
 */
-app.post("/auth/google", async (req, res) => {
+app.post("/auth/google", authRateLimit, async (req, res) => {
     try {
         if (!googleClient || !GOOGLE_CLIENT_ID) {
             return res.status(503).json({ message: "Google sign-in is not configured on the server." });
@@ -653,7 +846,7 @@ app.post("/auth/google", async (req, res) => {
         if (!credential) return res.status(400).json({ message: "Google authentication credential is missing." });
         const ticket = await googleClient.verifyIdToken({ idToken: credential, audience: GOOGLE_CLIENT_ID });
         const payload = ticket.getPayload();
-        if (!payload?.sub || !payload.email) return res.status(401).json({ message: "Google authentication could not be verified." });
+        if (!payload?.sub || !payload.email || payload.email_verified !== true) return res.status(401).json({ message: "A verified Google account is required." });
         const signup = req.body?.signup;
         let signupName = "";
         let signupAge = null;
@@ -663,6 +856,12 @@ app.post("/auth/google", async (req, res) => {
             if (!signupName || signupName.length > 80 || !Number.isInteger(signupAge) || signupAge < 1 || signupAge > 120) {
                 return res.status(400).json({ message: "Please provide a name and a valid age between 1 and 120." });
             }
+        }
+        try {
+            await regenerateSession(req);
+        } catch (error) {
+            console.error("Session regeneration error:", error);
+            return res.status(500).json({ message: "Unable to create a secure sign-in session. Please try again." });
         }
         req.session.user = {
             sub: payload.sub,
@@ -684,7 +883,222 @@ app.post("/auth/google", async (req, res) => {
     }
 });
 
-app.post("/auth/guest", (req, res) => {
+app.post("/auth/microsoft/start", authRateLimit, (req, res) => {
+    if (!MICROSOFT_CLIENT_ID || !MICROSOFT_CLIENT_SECRET) {
+        return res.status(503).json({
+            message: "Microsoft sign-in is not configured. Set MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET on the server."
+        });
+    }
+
+    const mode = req.body?.mode === "signup" ? "signup" : "login";
+    let signup = null;
+    if (mode === "signup") {
+        const name = typeof req.body?.signup?.name === "string" ? req.body.signup.name.trim() : "";
+        const age = Number(req.body?.signup?.age);
+        if (!name || name.length > 80 || !Number.isInteger(age) || age < 1 || age > 120) {
+            return res.status(400).json({ message: "Please provide your name and a valid age between 1 and 120." });
+        }
+        signup = { name, age };
+    }
+
+    const state = crypto.randomBytes(32).toString("base64url");
+    const nonce = crypto.randomBytes(32).toString("base64url");
+    const codeVerifier = crypto.randomBytes(48).toString("base64url");
+    const codeChallenge = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
+    req.session.microsoftAuth = {
+        state,
+        nonce,
+        codeVerifier,
+        mode,
+        signup,
+        createdAt: Date.now()
+    };
+
+    const authorizeUrl = new URL(`${MICROSOFT_AUTHORITY}/oauth2/v2.0/authorize`);
+    authorizeUrl.search = new URLSearchParams({
+        client_id: MICROSOFT_CLIENT_ID,
+        response_type: "code",
+        response_mode: "query",
+        redirect_uri: `${APP_BASE_URL}/auth/microsoft/callback`,
+        scope: "openid profile email",
+        state,
+        nonce,
+        code_challenge: codeChallenge,
+        code_challenge_method: "S256",
+        prompt: mode === "signup" ? "create" : "select_account"
+    }).toString();
+
+    return req.session.save((error) => {
+        if (error) {
+            console.error("Microsoft auth session save error:", error);
+            return res.status(500).json({ message: "Unable to start Microsoft sign-in. Please try again." });
+        }
+        return res.json({ authorizeUrl: authorizeUrl.toString() });
+    });
+});
+
+const microsoftSigningKeys = new Map();
+let microsoftSigningKeysExpiresAt = 0;
+
+async function getMicrosoftSigningKey(keyId) {
+    if (microsoftSigningKeysExpiresAt <= Date.now() || !microsoftSigningKeys.has(keyId)) {
+        const response = await fetch("https://login.microsoftonline.com/common/discovery/v2.0/keys", {
+            signal: AbortSignal.timeout(10000)
+        });
+        if (!response.ok) {
+            throw new Error(`Microsoft signing-key service responded with ${response.status}.`);
+        }
+        const keySet = await response.json();
+        if (!Array.isArray(keySet.keys)) {
+            throw new Error("Microsoft signing-key service returned an invalid key set.");
+        }
+
+        microsoftSigningKeys.clear();
+        for (const key of keySet.keys) {
+            if (key.kid && key.kty === "RSA" && key.use === "sig") {
+                microsoftSigningKeys.set(key.kid, key);
+            }
+        }
+        microsoftSigningKeysExpiresAt = Date.now() + 60 * 60 * 1000;
+    }
+
+    const jwk = microsoftSigningKeys.get(keyId);
+    if (!jwk) {
+        throw new Error("Microsoft ID token was signed with an unknown key.");
+    }
+    return crypto.createPublicKey({ key: jwk, format: "jwk" });
+}
+
+async function verifyMicrosoftIdToken(idToken, expectedNonce) {
+    if (typeof idToken !== "string") {
+        throw new Error("Microsoft did not return an ID token.");
+    }
+
+    const parts = idToken.split(".");
+    if (parts.length !== 3) {
+        throw new Error("Microsoft returned a malformed ID token.");
+    }
+
+    const header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
+    const claims = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    if (header.alg !== "RS256" || typeof header.kid !== "string") {
+        throw new Error("Microsoft returned an unsupported ID token.");
+    }
+
+    const key = await getMicrosoftSigningKey(header.kid);
+    const validSignature = crypto.verify(
+        "RSA-SHA256",
+        Buffer.from(`${parts[0]}.${parts[1]}`),
+        key,
+        Buffer.from(parts[2], "base64url")
+    );
+    if (!validSignature) {
+        throw new Error("Microsoft ID token signature verification failed.");
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const tenantId = typeof claims.tid === "string" ? claims.tid : "";
+    const expectedIssuer = `https://login.microsoftonline.com/${tenantId}/v2.0`;
+    if (!claims.sub ||
+        claims.aud !== MICROSOFT_CLIENT_ID ||
+        claims.iss !== expectedIssuer ||
+        claims.nonce !== expectedNonce ||
+        !Number.isFinite(claims.exp) ||
+        claims.exp <= now ||
+        (Number.isFinite(claims.nbf) && claims.nbf > now + 60) ||
+        !/^[0-9a-f-]{36}$/i.test(tenantId)) {
+        throw new Error("Microsoft ID token claims could not be validated.");
+    }
+
+    if (/^[0-9a-f-]{36}$/i.test(MICROSOFT_TENANT) &&
+        tenantId.toLowerCase() !== MICROSOFT_TENANT.toLowerCase()) {
+        throw new Error("Microsoft ID token was issued by an unexpected tenant.");
+    }
+    return claims;
+}
+
+app.get("/auth/microsoft/callback", authRateLimit, async (req, res) => {
+    const pending = req.session.microsoftAuth;
+    delete req.session.microsoftAuth;
+
+    const returnedState = typeof req.query.state === "string" ? req.query.state : "";
+    const stateMatches = pending &&
+        pending.createdAt + 10 * 60 * 1000 > Date.now() &&
+        returnedState.length === pending.state.length &&
+        crypto.timingSafeEqual(Buffer.from(returnedState), Buffer.from(pending.state));
+    if (!stateMatches) {
+        return res.redirect("/?auth_error=microsoft_state");
+    }
+    if (typeof req.query.error === "string" || typeof req.query.code !== "string") {
+        return res.redirect("/?auth_error=microsoft_denied");
+    }
+
+    try {
+        const tokenResponse = await fetch(`${MICROSOFT_AUTHORITY}/oauth2/v2.0/token`, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+                client_id: MICROSOFT_CLIENT_ID,
+                client_secret: MICROSOFT_CLIENT_SECRET,
+                grant_type: "authorization_code",
+                code: req.query.code,
+                redirect_uri: `${APP_BASE_URL}/auth/microsoft/callback`,
+                code_verifier: pending.codeVerifier
+            }),
+            signal: AbortSignal.timeout(15000)
+        });
+        const tokenData = await tokenResponse.json();
+        if (!tokenResponse.ok || typeof tokenData.id_token !== "string") {
+            console.error("Microsoft token exchange failed:", tokenData.error || tokenResponse.status);
+            return res.redirect("/?auth_error=microsoft_exchange");
+        }
+
+        const claims = await verifyMicrosoftIdToken(tokenData.id_token, pending.nonce);
+        const email = typeof claims.email === "string"
+            ? claims.email
+            : typeof claims.preferred_username === "string"
+                ? claims.preferred_username
+                : "";
+        if (!isValidEmail(email)) {
+            return res.redirect("/?auth_error=microsoft_email");
+        }
+
+        await regenerateSession(req);
+        req.session.user = {
+            sub: `microsoft:${claims.tid}:${claims.sub}`,
+            name: pending.mode === "signup" && pending.signup?.name
+                ? pending.signup.name
+                : typeof claims.name === "string"
+                    ? claims.name.slice(0, 80)
+                    : email.split("@")[0],
+            email: email.toLowerCase(),
+            picture: "",
+            age: pending.mode === "signup" ? pending.signup.age : null,
+            isMicrosoftUser: true
+        };
+        return req.session.save((error) => {
+            if (error) {
+                console.error("Microsoft session creation error:", error);
+                return res.redirect("/?auth_error=microsoft_session");
+            }
+            return res.redirect("/chat");
+        });
+    } catch (error) {
+        console.error("Microsoft authentication error:", error);
+        return res.redirect("/?auth_error=microsoft_failed");
+    }
+});
+
+app.post("/auth/guest", authRateLimit, async (req, res) => {
+    if (!ALLOW_GUEST_ACCESS) {
+        return res.status(404).json({ message: "Guest access is disabled." });
+    }
+    try {
+        await regenerateSession(req);
+    } catch (error) {
+        console.error("Guest session regeneration error:", error);
+        return res.status(500).json({ message: "Unable to start a secure guest session. Please try again." });
+    }
     req.session.user = {
         sub: `guest:${crypto.randomUUID()}`,
         name: "Guest user",
@@ -701,18 +1115,132 @@ app.post("/auth/guest", (req, res) => {
     });
 });
 
-app.get("/auth/me", (req, res) => {
+app.post("/auth/email/start", authRateLimit, async (req, res) => {
+    const mode = req.body?.mode === "signup" ? "signup" : "login";
+    const email = normalizeEmailAddress(req.body?.email);
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+    const age = Number(req.body?.age);
+
+    if (!isValidEmail(email)) {
+        return res.status(400).json({ message: "Enter a valid email address to continue." });
+    }
+    if (password.length < 8 || password.length > 128) {
+        return res.status(400).json({ message: "Choose a password between 8 and 128 characters." });
+    }
+
+    if (mode === "signup") {
+        if (!name || name.length > 80) {
+            return res.status(400).json({ message: "Please provide your name to create an account." });
+        }
+        if (!Number.isInteger(age) || age < 1 || age > 120) {
+            return res.status(400).json({ message: "Enter a valid age between 1 and 120." });
+        }
+        if (emailAccounts.has(email)) {
+            return res.status(409).json({ message: "This email is already registered. Please log in instead." });
+        }
+    }
+
+    if (mode === "login") {
+        const existing = emailAccounts.get(email);
+        if (!existing || !verifyPassword(password, existing.passwordHash)) {
+            return res.status(401).json({ message: "Incorrect email or password." });
+        }
+    }
+
+    const pending = pendingEmailAuthentications.get(email);
+    if (pending && pending.expiresAt > Date.now()) {
+        pendingEmailAuthentications.delete(email);
+    }
+
+    const code = createPendingEmailAuth(email, {
+        mode,
+        name,
+        age: Number.isInteger(age) ? age : null,
+        passwordHash: mode === "signup" ? hashPassword(password) : emailAccounts.get(email)?.passwordHash || hashPassword(password)
+    });
+
+    const shouldRevealCode = process.env.NODE_ENV !== "production" || process.env.SHOW_OTP_DEV_CODES === "true";
+    return res.json({
+        requiresOtp: true,
+        message: "A 6-digit verification code has been sent to your email.",
+        ...(shouldRevealCode ? { debugCode: code } : {})
+    });
+});
+
+app.post("/auth/email/verify", authRateLimit, async (req, res) => {
+    const email = normalizeEmailAddress(req.body?.email);
+    const code = String(req.body?.code || "").trim();
+    const pending = pendingEmailAuthentications.get(email);
+
+    if (!isValidEmail(email)) {
+        return res.status(400).json({ message: "Enter a valid email address to verify." });
+    }
+    if (!/^\d{6}$/.test(code)) {
+        return res.status(400).json({ message: "Enter the 6-digit verification code." });
+    }
+    if (!pending || pending.expiresAt < Date.now()) {
+        return res.status(400).json({ message: "Your verification code has expired. Please request a new one." });
+    }
+
+    const enteredHash = crypto.createHash("sha256").update(code).digest("hex");
+    const matches = pending.codeHash === enteredHash;
+    if (!matches) {
+        return res.status(401).json({ message: "The verification code does not match." });
+    }
+
+    try {
+        await regenerateSession(req);
+    } catch (error) {
+        console.error("Email session regeneration error:", error);
+        return res.status(500).json({ message: "Unable to create a secure email session. Please try again." });
+    }
+
+    if (pending.mode === "signup") {
+        const existing = emailAccounts.get(email);
+        if (existing) {
+            pendingEmailAuthentications.delete(email);
+            return res.status(409).json({ message: "This email is already registered. Please log in instead." });
+        }
+        const account = {
+            email,
+            name: pending.name,
+            age: Number.isInteger(pending.age) ? pending.age : null,
+            passwordHash: pending.passwordHash
+        };
+        emailAccounts.set(email, account);
+        req.session.user = getUserFromEmailAccount(account);
+    } else {
+        const account = emailAccounts.get(email);
+        if (!account) {
+            pendingEmailAuthentications.delete(email);
+            return res.status(401).json({ message: "No account was found for this email." });
+        }
+        req.session.user = getUserFromEmailAccount(account);
+    }
+
+    pendingEmailAuthentications.delete(email);
+    return req.session.save((error) => {
+        if (error) {
+            console.error("Email session creation error:", error);
+            return res.status(500).json({ message: "Unable to finish sign in. Please try again." });
+        }
+        return res.json({ user: req.session.user });
+    });
+});
+
+app.get("/auth/me", publicApiRateLimit, (req, res) => {
     if (!req.session.user) return res.status(401).json({ authenticated: false });
     return res.json({ authenticated: true, user: req.session.user });
 });
 
-app.post("/auth/logout", (req, res) => {
+app.post("/auth/logout", authRateLimit, (req, res) => {
     req.session.destroy((error) => {
         if (error) {
             console.error("Session destruction error:", error);
             return res.status(500).json({ message: "Unable to sign you out. Please try again." });
         }
-        res.clearCookie("nexora.sid", { httpOnly: true, sameSite: "lax", secure: IS_PRODUCTION, path: "/" });
+        res.clearCookie(SESSION_COOKIE_NAME, { httpOnly: true, sameSite: "lax", secure: IS_PRODUCTION, path: "/" });
         return res.json({ authenticated: false });
     });
 });
@@ -735,6 +1263,7 @@ app.get("/chat", requireAuth, (req, res) => {
 
 app.post(
     "/chat",
+    chatRateLimit,
     requireAuth,
     upload.array("attachments", MAX_FILES),
     async (req, res) => {
@@ -751,6 +1280,11 @@ app.post(
                 return res.status(400).json({
                     reply:
                         "Please enter a message or attach a file."
+                });
+            }
+            if (message.length > MAX_MESSAGE_LENGTH) {
+                return res.status(400).json({
+                    reply: `Messages must be ${MAX_MESSAGE_LENGTH.toLocaleString()} characters or fewer.`
                 });
             }
 
@@ -811,7 +1345,7 @@ app.post(
 |--------------------------------------------------------------------------
 */
 
-app.get("/stream", requireAuth, async (req, res) => {
+app.get("/stream", chatRateLimit, requireAuth, async (req, res) => {
     const message =
         typeof req.query.message === "string"
             ? req.query.message
@@ -819,6 +1353,11 @@ app.get("/stream", requireAuth, async (req, res) => {
 
     if (!message.trim()) {
         return res.status(400).end();
+    }
+    if (message.length > MAX_MESSAGE_LENGTH) {
+        return res.status(400).json({
+            message: `Messages must be ${MAX_MESSAGE_LENGTH.toLocaleString()} characters or fewer.`
+        });
     }
 
     res.setHeader(
@@ -960,9 +1499,10 @@ app.get("/stream", requireAuth, async (req, res) => {
 |--------------------------------------------------------------------------
 */
 
-app.get("/config", (req, res) => {
+app.get("/config", publicApiRateLimit, (req, res) => {
     res.json({
         googleClientId: GOOGLE_CLIENT_ID,
+        microsoftConfigured: Boolean(MICROSOFT_CLIENT_ID && MICROSOFT_CLIENT_SECRET),
         providers: {
             gemini: {
                 name: "Google Gemini",
@@ -990,7 +1530,7 @@ app.get("/config", (req, res) => {
     });
 });
 
-app.get("/api/pricing", async (req, res) => {
+app.get("/api/pricing", pricingRateLimit, async (req, res) => {
     const countryCode = String(req.query.country || "US").toUpperCase();
     const country = PRICING_COUNTRIES[countryCode];
     if (!country) {
@@ -1016,6 +1556,13 @@ app.get("/api/pricing", async (req, res) => {
         res.json({
             country: { code: countryCode, name: country.name },
             currency: country.currency,
+            checkoutAvailable: PAYSTACK_SUPPORTED_CURRENCIES.has(country.currency) &&
+                Boolean(PAYSTACK_SECRET_KEY),
+            checkoutMessage: !PAYSTACK_SECRET_KEY
+                ? "Paystack checkout is not configured on the server yet."
+                : PAYSTACK_SUPPORTED_CURRENCIES.has(country.currency)
+                    ? "Pay securely with Paystack."
+                    : `Paystack checkout is not available in ${country.currency}.`,
             exchangeRate: rate,
             rateUpdatedAt: exchangeRateCache?.updatedAt || null,
             countries: Object.entries(PRICING_COUNTRIES)
@@ -1038,6 +1585,207 @@ app.get("/api/pricing", async (req, res) => {
     }
 });
 
+app.post("/api/checkout", paymentRateLimit, requireAuth, async (req, res) => {
+    if (!PAYSTACK_SECRET_KEY) {
+        return res.status(503).json({
+            message: "Payments are not configured yet. Add PAYSTACK_SECRET_KEY to the server environment."
+        });
+    }
+
+    const { planId, country: countryCode } = req.body || {};
+    const plan = PRICING_PLANS.find((item) => item.id === planId);
+    const country = PRICING_COUNTRIES[String(countryCode || "").toUpperCase()];
+    const email = typeof req.body?.email === "string"
+        ? req.body.email.trim().toLowerCase()
+        : req.session.user.email;
+    const name = typeof req.body?.name === "string" && req.body.name.trim()
+        ? req.body.name.trim().slice(0, 120)
+        : req.session.user.name;
+
+    if (!plan || !country) {
+        return res.status(400).json({ message: "Choose a valid plan and country." });
+    }
+    if (!PAYSTACK_SUPPORTED_CURRENCIES.has(country.currency)) {
+        return res.status(400).json({
+            message: `Paystack checkout is not available in ${country.currency}. Choose another country.`
+        });
+    }
+    if (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ message: "Enter a valid email address for your payment receipt." });
+    }
+
+    try {
+        const rates = country.currency === "USD"
+            ? { USD: 1 }
+            : await getUsdExchangeRates();
+        const rate = rates[country.currency];
+        if (!Number.isFinite(rate) || rate <= 0) {
+            return res.status(400).json({
+                message: `Checkout is not available in ${country.currency}. Choose another country.`
+            });
+        }
+
+        const fractionDigits = new Intl.NumberFormat("en", {
+            style: "currency",
+            currency: country.currency
+        }).resolvedOptions().maximumFractionDigits;
+        const amount = Number((plan.usdMonthly * rate).toFixed(fractionDigits));
+        const amountSubunits = Math.round(amount * (10 ** fractionDigits));
+        if (!Number.isSafeInteger(amountSubunits) || amountSubunits <= 0) {
+            throw new Error("Calculated checkout amount is outside the supported range.");
+        }
+
+        const reference = `nexora-${crypto.randomUUID()}`;
+        const callbackUrl = new URL("/chat?payment=return", APP_BASE_URL).toString();
+        const paystackResponse = await fetch("https://api.paystack.co/transaction/initialize", {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                email,
+                amount: amountSubunits,
+                currency: country.currency,
+                reference,
+                callback_url: callbackUrl,
+                metadata: {
+                    plan_id: plan.id,
+                    plan_name: plan.name,
+                    customer_name: String(name || email.split("@")[0]).slice(0, 120)
+                }
+            }),
+            signal: AbortSignal.timeout(15000)
+        });
+        const result = await paystackResponse.json();
+        const checkoutUrl = result?.data?.authorization_url;
+        if (!paystackResponse.ok || result.status !== true ||
+            result.data?.reference !== reference || typeof checkoutUrl !== "string") {
+            console.error("Paystack checkout initialization failed:", result.message || paystackResponse.status);
+            return res.status(502).json({
+                message: "Unable to start secure checkout. Please try again."
+            });
+        }
+
+        const parsedCheckoutUrl = new URL(checkoutUrl);
+        if (parsedCheckoutUrl.protocol !== "https:" ||
+            parsedCheckoutUrl.hostname !== "checkout.paystack.com") {
+            console.error("Paystack returned an unexpected checkout URL.");
+            return res.status(502).json({
+                message: "Unable to start secure checkout. Please try again."
+            });
+        }
+
+        req.session.checkout = {
+            reference,
+            planId: plan.id,
+            planName: plan.name,
+            amount,
+            amountSubunits,
+            currency: country.currency,
+            createdAt: Date.now()
+        };
+        req.session.save((error) => {
+            if (error) {
+                console.error("Unable to save checkout session:", error);
+                return res.status(500).json({
+                    message: "Unable to prepare checkout. Please try again."
+                });
+            }
+            return res.json({ checkoutUrl, reference });
+        });
+    } catch (error) {
+        console.error("Unable to initialize Paystack checkout:", error);
+        return res.status(502).json({
+            message: "Unable to start secure checkout. Please try again."
+        });
+    }
+});
+
+app.post("/api/checkout/verify", verifyRateLimit, requireAuth, async (req, res) => {
+    if (!PAYSTACK_SECRET_KEY) {
+        return res.status(503).json({ message: "Payment verification is not configured." });
+    }
+
+    const checkout = req.session.checkout;
+    const reference = typeof req.body?.reference === "string" ? req.body.reference : "";
+    if (!checkout || checkout.reference !== reference ||
+        Date.now() - checkout.createdAt > 24 * 60 * 60 * 1000) {
+        return res.status(400).json({
+            message: "This payment could not be matched to your active checkout."
+        });
+    }
+
+    try {
+        const response = await fetch(
+            `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
+            {
+                headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` },
+                signal: AbortSignal.timeout(15000)
+            }
+        );
+        const result = await response.json();
+        const transaction = result?.data;
+        if (!response.ok || result.status !== true || !transaction) {
+            console.error("Paystack payment verification failed:", result.message || response.status);
+            return res.status(502).json({
+                message: "Unable to verify this payment yet. Please try again."
+            });
+        }
+        if (transaction.reference !== checkout.reference ||
+            transaction.currency !== checkout.currency ||
+            !Number.isSafeInteger(transaction.amount) ||
+            transaction.amount < checkout.amountSubunits) {
+            return res.status(400).json({
+                message: "The payment details did not match this checkout."
+            });
+        }
+
+        if (transaction.status !== "success") {
+            const failed = ["failed", "abandoned"].includes(transaction.status);
+            return res.json({
+                status: failed ? "failed" : "pending",
+                message: failed
+                    ? "The payment was not completed. You can start checkout again."
+                    : "Payment is still processing. Check again shortly."
+            });
+        }
+
+        const paidAt = Date.now();
+        const validUntil = new Date(paidAt);
+        validUntil.setMonth(validUntil.getMonth() + 1);
+        const payment = {
+            planId: checkout.planId,
+            planName: checkout.planName,
+            amount: checkout.amount,
+            currency: checkout.currency,
+            reference: checkout.reference,
+            paidAt,
+            validUntil: validUntil.getTime()
+        };
+        req.session.lastPayment = payment;
+        req.session.checkout = null;
+        req.session.save((error) => {
+            if (error) {
+                console.error("Unable to save verified payment to session:", error);
+                return res.status(500).json({
+                    message: "Payment was received, but your confirmation could not be saved. Contact support with your payment reference."
+                });
+            }
+            return res.json({
+                status: "successful",
+                planName: payment.planName,
+                validUntil: new Date(payment.validUntil).toISOString(),
+                reference: payment.reference
+            });
+        });
+    } catch (error) {
+        console.error("Paystack payment verification failed:", error);
+        return res.status(502).json({
+            message: "Unable to verify this payment yet. Please try again."
+        });
+    }
+});
 /*
 |--------------------------------------------------------------------------
 | HOME
@@ -1067,13 +1815,18 @@ app.use(
         res,
         next
     ) => {
+        if (error?.type === "entity.too.large") {
+            return res.status(413).json({
+                message: "Request body is too large."
+            });
+        }
         if (
             error?.code ===
             "LIMIT_FILE_SIZE"
         ) {
             return res.status(400).json({
                 reply:
-                    "File is too large. Maximum supported size is 100 MB."
+                    "File is too large. Maximum supported size is 20 MB."
             });
         }
 
@@ -1085,7 +1838,7 @@ app.use(
         ) {
             return res.status(400).json({
                 reply:
-                    "You can attach up to 5 supported files."
+                    "You can attach up to 3 supported files."
             });
         }
 

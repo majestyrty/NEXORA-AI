@@ -4,7 +4,7 @@ const sendBtn = document.getElementById("sendBtn");
 const fileInput = document.getElementById("fileInput");
 const attachmentPreview = document.getElementById("attachmentPreview");
 const modelSelect = document.getElementById("modelSelect");
-const state = { files: [], conversations: JSON.parse(localStorage.getItem("nexora_chats") || "[]"), current: [], sending: false, config: null, user: null, provider: "gemini", authMode: "login", pendingSignup: null, headlineTimer: null, welcomeAnimation: null, pricingCountry: localStorage.getItem("nexora_pricing_country") || "US", pricingRequestId: 0 };
+const state = { files: [], conversations: JSON.parse(localStorage.getItem("nexora_chats") || "[]"), current: [], sending: false, config: null, user: null, provider: "gemini", authMode: "login", pendingSignup: null, emailAuthSession: null, headlineTimer: null, welcomeAnimation: null, pricingCountry: localStorage.getItem("nexora_pricing_country") || "US", pricingRequestId: 0, billingPlan: null, pendingPayment: null };
 
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[char]));
 function formatText(text) { return escapeHtml(text).replace(/```([\s\S]*?)```/g, "<pre><code>$1</code></pre>").replace(/^### (.*)$/gm, "<h3>$1</h3>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br>"); }
@@ -22,7 +22,7 @@ function stopWelcomeParticles() {
     state.welcomeAnimation = null;
 }
 function startWelcomeParticles(canvas) {
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (window.NexoraSettings?.get("particles") === false || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const context = canvas.getContext("2d");
     const particles = Array.from({ length: 42 }, () => ({
         x: Math.random(),
@@ -102,11 +102,10 @@ function renderPricing(pricing) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "pricing-cta";
-        button.textContent = "Ask about this plan";
+        button.textContent = pricing.checkoutAvailable ? "Pay for one month" : "Checkout unavailable";
+        button.disabled = !pricing.checkoutAvailable;
         button.onclick = () => {
-            input.value = `Tell me about the ${plan.name} plan and its pricing.`;
-            updateSendState();
-            input.focus();
+            openBillingDialog(plan, pricing);
         };
         card.append(name, price, basePrice, button);
         grid.appendChild(card);
@@ -135,11 +134,123 @@ async function loadPricing(countryCode = state.pricingCountry) {
         state.pricingCountry = data.country.code;
         localStorage.setItem("nexora_pricing_country", state.pricingCountry);
         renderPricing(data);
-        status.textContent = `Approximate ${data.currency} prices converted from USD. Taxes may vary by location.`;
+        const methodSummary = data.checkoutMessage;
+        status.textContent = data.currency === "USD"
+            ? `${methodSummary} Prices shown in USD. Taxes may vary by location.`
+            : `${methodSummary} Approximate ${data.currency} prices converted from USD. Taxes may vary by location.`;
     } catch (error) {
         if (requestId !== state.pricingRequestId) return;
         status.textContent = error.message || "Unable to load pricing. Please try again.";
     }
+}
+function openBillingDialog(plan, pricing) {
+    const dialog = document.getElementById("billingDialog");
+    state.billingPlan = plan;
+    document.getElementById("checkoutPlanSummary").textContent =
+        `${plan.name} · ${new Intl.NumberFormat(undefined, {
+            style: "currency",
+            currency: pricing.currency,
+            maximumFractionDigits: 2
+        }).format(plan.monthlyPrice)} for one month (${pricing.country.name})`;
+    document.getElementById("billingEmail").value = state.user?.email || "";
+    document.getElementById("checkoutError").textContent = "";
+    const submit = document.getElementById("checkoutSubmit");
+    submit.disabled = !pricing.checkoutAvailable;
+    submit.textContent = pricing.checkoutAvailable
+        ? "Continue to secure payment"
+        : "Checkout unavailable";
+    dialog.showModal();
+}
+async function beginCheckout(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    if (!state.billingPlan || !form.reportValidity()) return;
+    const submit = document.getElementById("checkoutSubmit");
+    const error = document.getElementById("checkoutError");
+    submit.disabled = true;
+    submit.textContent = "Connecting to Paystack…";
+    error.textContent = "";
+    try {
+        const response = await fetch("/api/checkout", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                planId: state.billingPlan.id,
+                country: state.pricingCountry,
+                email: document.getElementById("billingEmail").value.trim()
+            })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || "Unable to start checkout.");
+        const checkoutUrl = new URL(result.checkoutUrl);
+        if (checkoutUrl.protocol !== "https:" || checkoutUrl.hostname !== "checkout.paystack.com") {
+            throw new Error("The payment provider returned an invalid checkout link.");
+        }
+        window.location.assign(checkoutUrl.toString());
+    } catch (requestError) {
+        error.textContent = requestError.message || "Unable to start checkout. Please try again.";
+        submit.disabled = false;
+        submit.textContent = "Continue to secure payment";
+    }
+}
+async function verifyCheckout(reference) {
+    const status = document.getElementById("pricingStatus");
+    const checkButton = document.getElementById("checkPaymentButton");
+    if (checkButton) {
+        checkButton.disabled = true;
+        checkButton.textContent = "Checking payment…";
+    }
+    try {
+        const response = await fetch("/api/checkout/verify", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reference })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || "Unable to verify this payment.");
+        if (result.status === "successful") {
+            state.pendingPayment = null;
+            status.textContent = `Payment confirmed. ${result.planName} is paid for one month. No automatic renewal.`;
+            if (checkButton) checkButton.hidden = true;
+        } else if (result.status === "failed") {
+            state.pendingPayment = null;
+            status.textContent = result.message;
+            if (checkButton) checkButton.hidden = true;
+        } else {
+            state.pendingPayment = { reference };
+            status.textContent = result.message;
+            if (checkButton) {
+                checkButton.hidden = false;
+                checkButton.disabled = false;
+                checkButton.textContent = "Check payment status";
+            }
+        }
+    } catch (error) {
+        status.textContent = error.message || "Unable to verify this payment.";
+        if (checkButton) {
+            checkButton.hidden = false;
+            checkButton.disabled = false;
+            checkButton.textContent = "Try checking again";
+        }
+    }
+}
+function processPaymentReturn() {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("payment") !== "return") return;
+    const reference = url.searchParams.get("reference") || url.searchParams.get("trxref") || "";
+    url.searchParams.delete("payment");
+    url.searchParams.delete("reference");
+    url.searchParams.delete("trxref");
+    url.searchParams.delete("status");
+    window.history.replaceState({}, "", url);
+    if (!reference) {
+        document.getElementById("pricingStatus").textContent =
+            "We could not verify the payment redirect. Choose a plan to try again or contact support.";
+        return;
+    }
+    verifyCheckout(reference);
 }
 function addMessage(text, sender, files = [], time = timestamp()) {
     const message = document.createElement("article"); message.className = `message ${sender}`;
@@ -181,6 +292,7 @@ function renderWelcome() {
             </div>
             <div id="pricingGrid" class="pricing-grid" aria-live="polite"></div>
             <p id="pricingStatus" class="pricing-status" role="status">Loading local pricing…</p>
+            <button id="checkPaymentButton" class="check-payment-button" type="button" hidden>Check payment status</button>
         </div>
     </section>`;
     startWelcomeParticles(chat.querySelector(".welcome-particles"));
@@ -192,6 +304,11 @@ function renderWelcome() {
         });
     });
     chat.querySelector("#pricingCountry").addEventListener("change", (event) => loadPricing(event.target.value));
+    chat.querySelector("#checkPaymentButton").addEventListener("click", () => {
+        if (state.pendingPayment) {
+            verifyCheckout(state.pendingPayment.reference);
+        }
+    });
     loadPricing(state.pricingCountry);
 }
 function newChat() { stopWelcomeParticles(); chat.innerHTML = ""; state.current = []; state.files = []; input.value = ""; document.getElementById("fileError").textContent = ""; renderAttachments(); renderConversations(document.getElementById("searchChats").value); document.getElementById("sidebar").classList.remove("open"); renderWelcome(); }
@@ -242,6 +359,7 @@ async function enterApp(user) {
     showApp();
     renderConversations();
     newChat();
+    processPaymentReturn();
 }
 function redirectToChat() {
     window.location.assign("/chat");
@@ -265,6 +383,19 @@ function renderGoogleButton() {
     button.disabled = false;
     button.onclick = beginGoogleSignIn;
 }
+function renderMicrosoftButton() {
+    const button = document.getElementById("microsoftSignInButton");
+    const label = document.getElementById("microsoftSignInLabel");
+    if (!button || !label) return;
+    const configured = Boolean(state.config?.microsoftConfigured);
+    button.disabled = !configured;
+    button.title = configured
+        ? ""
+        : "Set MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET on the server to enable Microsoft sign-in.";
+    label.textContent = configured
+        ? state.authMode === "signup" ? "Sign up with Microsoft" : "Continue with Microsoft"
+        : "Microsoft sign-in unavailable";
+}
 function setAuthMode(mode) {
     state.authMode = mode;
     const signingUp = mode === "signup";
@@ -275,6 +406,12 @@ function setAuthMode(mode) {
     document.getElementById("signupModeButton").setAttribute("aria-pressed", String(signingUp));
     document.getElementById("authCopy").textContent = signingUp ? "Create your Nexora account and personalize your AI experience." : "Sign in to bring your conversations, files, and AI tools together.";
     document.getElementById("googleSignInButton").textContent = signingUp ? "Sign up with Google" : "Continue with Google";
+    renderMicrosoftButton();
+    document.getElementById("emailAuthButton").textContent = signingUp ? "Create account with email" : "Continue with email";
+    document.getElementById("emailAuthHint").textContent = "We will send a 6-digit code to your email.";
+    document.getElementById("otpFields").hidden = true;
+    document.getElementById("verifyOtpButton").hidden = true;
+    document.getElementById("otpInput").value = "";
     document.getElementById("authError").textContent = "";
 }
 function beginGoogleSignIn() {
@@ -289,7 +426,164 @@ function beginGoogleSignIn() {
     if (!window.google?.accounts?.id) { document.getElementById("authError").textContent = "Google sign-in is still loading. Please try again."; return; }
     window.google.accounts.id.prompt();
 }
-async function handleUnauthorized() { state.user = null; showAuthScreen("Your session expired. Please sign in again."); if (window.google?.accounts?.id) window.google.accounts.id.disableAutoSelect(); renderGoogleButton(); }
+async function beginMicrosoftSignIn() {
+    const signup = {};
+    if (state.authMode === "signup") {
+        signup.name = document.getElementById("signupName").value.trim();
+        signup.age = Number(document.getElementById("signupAge").value);
+        if (!signup.name || signup.name.length > 80) {
+            document.getElementById("authError").textContent = "Enter your name (up to 80 characters) to sign up.";
+            document.getElementById("signupName").focus();
+            return;
+        }
+        if (!Number.isInteger(signup.age) || signup.age < 1 || signup.age > 120) {
+            document.getElementById("authError").textContent = "Enter a valid age between 1 and 120 to sign up.";
+            document.getElementById("signupAge").focus();
+            return;
+        }
+    }
+
+    const button = document.getElementById("microsoftSignInButton");
+    button.disabled = true;
+    document.getElementById("authError").textContent = "";
+    try {
+        const response = await fetch("/auth/microsoft/start", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode: state.authMode, signup })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || "Unable to start Microsoft sign-in.");
+        window.location.assign(data.authorizeUrl);
+    } catch (error) {
+        document.getElementById("authError").textContent = error.message || "Microsoft sign-in failed. Please try again.";
+        button.disabled = !state.config?.microsoftConfigured;
+    }
+}
+function getMicrosoftAuthError() {
+    const code = new URLSearchParams(window.location.search).get("auth_error");
+    const messages = {
+        microsoft_state: "Microsoft sign-in expired or could not be verified. Please try again.",
+        microsoft_denied: "Microsoft sign-in was cancelled.",
+        microsoft_exchange: "Microsoft sign-in could not be completed. Please try again.",
+        microsoft_email: "Microsoft did not provide a valid email address for this account.",
+        microsoft_session: "Unable to create a secure sign-in session. Please try again.",
+        microsoft_failed: "Microsoft sign-in failed. Please try again."
+    };
+    return messages[code] || "";
+}
+async function beginEmailAuth() {
+    const emailInput = document.getElementById("emailInput");
+    const passwordInput = document.getElementById("passwordInput");
+    const signupNameInput = document.getElementById("signupName");
+    const signupAgeInput = document.getElementById("signupAge");
+    const email = emailInput.value.trim();
+    const password = passwordInput.value;
+    const mode = state.authMode;
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        document.getElementById("authError").textContent = "Enter a valid email address.";
+        emailInput.focus();
+        return;
+    }
+    if (password.length < 8 || password.length > 128) {
+        document.getElementById("authError").textContent = "Choose a password between 8 and 128 characters.";
+        passwordInput.focus();
+        return;
+    }
+
+    if (mode === "signup") {
+        const name = signupNameInput.value.trim();
+        const age = Number(signupAgeInput.value);
+        if (!name || name.length > 80) {
+            document.getElementById("authError").textContent = "Enter your name (up to 80 characters) to sign up.";
+            signupNameInput.focus();
+            return;
+        }
+        if (!Number.isInteger(age) || age < 1 || age > 120) {
+            document.getElementById("authError").textContent = "Enter a valid age between 1 and 120 to sign up.";
+            signupAgeInput.focus();
+            return;
+        }
+    }
+
+    const submitButton = document.getElementById("emailAuthButton");
+    submitButton.disabled = true;
+    submitButton.textContent = "Sending code...";
+    document.getElementById("authError").textContent = "";
+
+    try {
+        const response = await fetch("/auth/email/start", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                mode,
+                email,
+                password,
+                name: signupNameInput.value.trim(),
+                age: Number(signupAgeInput.value)
+            })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || "Unable to send verification code.");
+
+        const otpFields = document.getElementById("otpFields");
+        const verifyButton = document.getElementById("verifyOtpButton");
+        otpFields.hidden = false;
+        verifyButton.hidden = false;
+        document.getElementById("emailAuthHint").textContent = data.debugCode
+            ? `Code sent. Demo verification code: ${data.debugCode}`
+            : data.message;
+        document.getElementById("otpInput").focus();
+        state.emailAuthSession = { email, mode };
+    } catch (error) {
+        document.getElementById("authError").textContent = error.message || "Unable to send a verification code.";
+    } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = state.authMode === "signup" ? "Create account with email" : "Continue with email";
+    }
+}
+async function verifyEmailCode() {
+    const otpInput = document.getElementById("otpInput");
+    const code = otpInput.value.trim();
+    const session = state.emailAuthSession;
+
+    if (!session) {
+        document.getElementById("authError").textContent = "Please request a verification code first.";
+        return;
+    }
+    if (!/^\d{6}$/.test(code)) {
+        document.getElementById("authError").textContent = "Enter the 6-digit verification code.";
+        otpInput.focus();
+        return;
+    }
+
+    const verifyButton = document.getElementById("verifyOtpButton");
+    verifyButton.disabled = true;
+    verifyButton.textContent = "Verifying...";
+    document.getElementById("authError").textContent = "";
+
+    try {
+        const response = await fetch("/auth/email/verify", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: session.email, code })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || "Unable to verify the code.");
+        state.emailAuthSession = null;
+        redirectToChat();
+    } catch (error) {
+        document.getElementById("authError").textContent = error.message || "Verification failed.";
+    } finally {
+        verifyButton.disabled = false;
+        verifyButton.textContent = "Verify code";
+    }
+}
+async function handleUnauthorized() { state.user = null; showAuthScreen("Your session expired. Please sign in again."); if (window.google?.accounts?.id) window.google.accounts.id.disableAutoSelect(); renderGoogleButton(); renderMicrosoftButton(); }
 async function loadConfig() {
     state.config = await fetchWithTimeout("/config").then((response) => response.json());
     const savedProvider = localStorage.getItem("nexora_provider") || "gemini"; state.provider = state.config.providers[savedProvider] ? savedProvider : Object.keys(state.config.providers)[0];
@@ -324,11 +618,11 @@ async function sendMessage() {
 }
 document.getElementById("attachBtn").onclick = () => fileInput.click();
 fileInput.onchange = () => {
-    const maxSize = (state.config?.maxFileSize || 100 * 1024 * 1024);
+    const maxSize = (state.config?.maxFileSize || 20 * 1024 * 1024);
     const selected = Array.from(fileInput.files);
     const oversized = selected.find((file) => file.size > maxSize);
     if (oversized) {
-        document.getElementById("fileError").textContent = `${oversized.name} is too large. Files must be 100 MB or smaller.`;
+        document.getElementById("fileError").textContent = `${oversized.name} is too large. Files must be 20 MB or smaller.`;
         fileInput.value = "";
         return;
     }
@@ -346,7 +640,25 @@ window.addEventListener("nexora-provider-change", (event) => { state.provider = 
 document.getElementById("logoutBtn").onclick = () => document.getElementById("settingsLogoutBtn").click();
 document.getElementById("loginModeButton").onclick = () => setAuthMode("login");
 document.getElementById("signupModeButton").onclick = () => setAuthMode("signup");
+document.getElementById("emailAuthButton").onclick = beginEmailAuth;
+document.getElementById("verifyOtpButton").onclick = verifyEmailCode;
+document.getElementById("passwordInput").onkeydown = (event) => { if (event.key === "Enter") { if (document.getElementById("otpFields").hidden) beginEmailAuth(); else verifyEmailCode(); } };
+document.getElementById("otpInput").onkeydown = (event) => { if (event.key === "Enter") verifyEmailCode(); };
 document.getElementById("googleSignInButton").onclick = beginGoogleSignIn;
+document.getElementById("microsoftSignInButton").onclick = beginMicrosoftSignIn;
+window.addEventListener("nexora-particles-change", (event) => {
+    const canvas = chat.querySelector(".welcome-particles");
+    if (!canvas) return;
+    stopWelcomeParticles();
+    if (event.detail) startWelcomeParticles(canvas);
+});
+document.getElementById("billingForm").addEventListener("submit", beginCheckout);
+document.getElementById("closeBilling").addEventListener("click", () => {
+    document.getElementById("billingDialog").close();
+});
+document.getElementById("billingDialog").addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) event.currentTarget.close();
+});
 
 (async function init() {
     try {
@@ -364,6 +676,12 @@ document.getElementById("googleSignInButton").onclick = beginGoogleSignIn;
             }
             showAuthScreen(state.config.googleClientId ? "" : "Google sign-in is not configured on the server. Add GOOGLE_CLIENT_ID to .env.");
             const waitForGoogle = setInterval(() => { if (window.google?.accounts?.id) { clearInterval(waitForGoogle); renderGoogleButton(); } }, 100);
+            renderMicrosoftButton();
+            const microsoftAuthError = getMicrosoftAuthError();
+            if (microsoftAuthError) {
+                document.getElementById("authError").textContent = microsoftAuthError;
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
             return;
         }
         const data = await session.json(); await enterApp(data.user);

@@ -19,7 +19,7 @@ function applyTheme() {
     document.documentElement.style.setProperty("--accent", accent);
     document.documentElement.style.setProperty("--accent-strong", strong);
 }
-function update(key, value) { preferences[key] = value; localStorage.setItem(settingKeys[key], JSON.stringify(value)); applyTheme(); }
+function update(key, value) { preferences[key] = value; localStorage.setItem(settingKeys[key], JSON.stringify(value)); applyTheme(); if (key === "particles") { const canvas = $("particleCanvas"); if (canvas) canvas.style.display = value ? "block" : "none"; window.dispatchEvent(new CustomEvent("nexora-particles-change", { detail: value })); } }
 function syncControls() {
     $("themeSelect").value = preferences.theme; $("accentSelect").value = preferences.accent;
     $("enterToggle").checked = preferences.enter; $("timestampToggle").checked = preferences.timestamps; $("animationToggle").checked = preferences.animations; $("scrollToggle").checked = preferences.scroll; $("streamToggle").checked = preferences.stream; $("previewToggle").checked = preferences.preview; $("styleSelect").value = preferences.responseStyle; $("particleToggle").checked = preferences.particles;

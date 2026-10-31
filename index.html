@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nexora AI</title>
-    <link rel="stylesheet" href="style.css?v=6">
+    <link rel="stylesheet" href="style.css?v=10">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body class="auth-checking">
@@ -29,7 +29,25 @@
                 <input id="signupAge" name="age" type="number" min="1" max="120" inputmode="numeric" placeholder="Enter your age">
                 <p class="signup-privacy">Your age is used to tailor responses and kept in your active sign-in session.</p>
             </div>
+            <div class="email-auth-fields">
+                <label for="emailInput">Email address</label>
+                <input id="emailInput" name="email" type="email" autocomplete="email" placeholder="you@example.com">
+                <label for="passwordInput">Password</label>
+                <input id="passwordInput" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="128" placeholder="Enter a secure password">
+                <div id="otpFields" class="otp-fields" hidden>
+                    <label for="otpInput">Verification code</label>
+                    <input id="otpInput" name="otp" type="text" inputmode="numeric" maxlength="6" placeholder="123456" aria-label="Six digit verification code">
+                </div>
+                <button id="emailAuthButton" class="auth-submit-button email-auth-button" type="button">Continue with email</button>
+                <button id="verifyOtpButton" class="auth-submit-button verify-otp-button" type="button" hidden>Verify code</button>
+                <p id="emailAuthHint" class="email-auth-hint">We will send a 6-digit code to your email.</p>
+            </div>
+            <div class="auth-divider"><span>or</span></div>
             <button id="googleSignInButton" class="google-sign-in-button auth-submit-button" type="button">Continue with Google</button>
+            <button id="microsoftSignInButton" class="microsoft-sign-in-button auth-submit-button" type="button">
+                <span class="microsoft-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                <span id="microsoftSignInLabel">Continue with Microsoft</span>
+            </button>
             <p id="authError" class="auth-error" role="alert"></p>
         </div>
     </section>
@@ -74,12 +92,26 @@
             <section><h3>Appearance</h3><div class="setting-item"><label for="themeSelect">Theme</label><select id="themeSelect"><option value="dark">Midnight</option><option value="aurora">Aurora</option><option value="graphite">Graphite</option><option value="light">Light mode</option><option value="system">System default</option></select></div><div class="setting-item"><label for="accentSelect">Accent color</label><select id="accentSelect"><option value="blue">Blue</option><option value="red">Red</option><option value="black">Black</option><option value="purple">Purple</option><option value="green">Green</option><option value="orange">Orange</option></select></div><div class="setting-item"><label for="particleToggle">Particle background</label><input type="checkbox" id="particleToggle" checked></div></section>
             <section><h3>AI</h3><div class="setting-item"><label for="providerSelect">AI provider</label><select id="providerSelect"><option value="gemini">Gemini</option><option value="openai">OpenAI</option></select></div><div class="setting-item"><label for="settingsModelSelect">AI model</label><select id="settingsModelSelect"></select></div></section>
             <section><h3>Chat</h3><div class="setting-item"><label for="enterToggle">Enter to send</label><input type="checkbox" id="enterToggle" checked></div><div class="setting-item"><label for="timestampToggle">Show timestamps</label><input type="checkbox" id="timestampToggle" checked></div><div class="setting-item"><label for="animationToggle">Message animations</label><input type="checkbox" id="animationToggle" checked></div><div class="setting-item"><label for="scrollToggle">Auto-scroll</label><input type="checkbox" id="scrollToggle" checked></div><div class="setting-item"><label for="streamToggle">Streaming responses</label><input type="checkbox" id="streamToggle" checked></div><div class="setting-item"><label for="styleSelect">Response style</label><select id="styleSelect"><option>Concise</option><option selected>Balanced</option><option>Detailed</option></select></div></section>
-            <section><h3>File settings</h3><p class="settings-note">Up to 100 MB each · PDF, TXT, DOC, DOCX, CSV, XLSX, JPG, PNG, WEBP</p><div class="setting-item"><label for="previewToggle">Automatic image previews</label><input type="checkbox" id="previewToggle" checked></div></section>
+            <section><h3>File settings</h3><p class="settings-note">Up to 20 MB each · 3 files per message · PDF, TXT, DOC, DOCX, CSV, XLSX, JPG, PNG, WEBP</p><div class="setting-item"><label for="previewToggle">Automatic image previews</label><input type="checkbox" id="previewToggle" checked></div></section>
             <section><h3>Account</h3><div class="account-summary"><img id="settingsAvatar" class="user-avatar" alt=""><div><strong id="settingsUserName">Nexora user</strong><small id="settingsUserEmail"></small></div></div><button id="settingsLogoutBtn" class="secondary-btn danger">Sign out</button></section>
             <section><h3>Privacy</h3><p class="settings-note">Your API key stays on the server. Uploaded files are processed for the current request and are not retained by this application.</p></section>
             <section class="chat-management"><h3>Chat management</h3><button id="clearChatBtn" class="secondary-btn">Clear current chat</button><button id="clearAllBtn" class="secondary-btn danger">Clear all local chats</button><button id="exportBtn" class="secondary-btn">Export chat</button></section>
         </aside>
+        <dialog class="billing-dialog" id="billingDialog" aria-labelledby="billingTitle">
+            <form id="billingForm">
+                <div class="billing-header">
+                    <div><span class="welcome-kicker">SECURE CHECKOUT</span><h2 id="billingTitle">Complete your plan purchase</h2></div>
+                    <button id="closeBilling" class="btn-icon" type="button" aria-label="Close checkout">×</button>
+                </div>
+                <p id="checkoutPlanSummary" class="checkout-plan-summary"></p>
+                <label for="billingEmail">Receipt email</label>
+                <input id="billingEmail" name="email" type="email" autocomplete="email" required maxlength="254" placeholder="you@example.com">
+                <p class="billing-note">One-time payment for one month. Paystack securely collects your payment details; Nexora never handles or stores your card or bank credentials.</p>
+                <p id="checkoutError" class="checkout-error" role="alert"></p>
+                <button id="checkoutSubmit" class="pricing-cta billing-submit" type="submit">Continue to secure payment</button>
+            </form>
+        </dialog>
     </div>
-    <script src="particles.js?v=3"></script><script src="settings.js?v=3"></script><script src="script.js?v=5"></script>
+    <script src="particles.js?v=3"></script><script src="settings.js?v=4"></script><script src="script.js?v=10"></script>
 </body>
 </html>
