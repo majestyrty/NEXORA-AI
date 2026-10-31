@@ -50,6 +50,64 @@ const OPENAI_MODELS = {
     "gpt-5.6-luna": "gpt-5.6-luna"
 };
 
+const PRICING_PLANS = [
+    { id: "go", name: "Nexora Go", usdMonthly: 10 },
+    { id: "pro", name: "Nexora Pro", usdMonthly: 25 },
+    { id: "plus", name: "Nexora Plus", usdMonthly: 50 }
+];
+const PRICING_COUNTRIES = {
+    AU: { name: "Australia", currency: "AUD" },
+    BR: { name: "Brazil", currency: "BRL" },
+    CA: { name: "Canada", currency: "CAD" },
+    CN: { name: "China", currency: "CNY" },
+    FR: { name: "France", currency: "EUR" },
+    DE: { name: "Germany", currency: "EUR" },
+    GH: { name: "Ghana", currency: "GHS" },
+    IN: { name: "India", currency: "INR" },
+    IE: { name: "Ireland", currency: "EUR" },
+    IT: { name: "Italy", currency: "EUR" },
+    JP: { name: "Japan", currency: "JPY" },
+    KE: { name: "Kenya", currency: "KES" },
+    MX: { name: "Mexico", currency: "MXN" },
+    NG: { name: "Nigeria", currency: "NGN" },
+    NZ: { name: "New Zealand", currency: "NZD" },
+    PK: { name: "Pakistan", currency: "PKR" },
+    SG: { name: "Singapore", currency: "SGD" },
+    ZA: { name: "South Africa", currency: "ZAR" },
+    KR: { name: "South Korea", currency: "KRW" },
+    ES: { name: "Spain", currency: "EUR" },
+    CH: { name: "Switzerland", currency: "CHF" },
+    AE: { name: "United Arab Emirates", currency: "AED" },
+    GB: { name: "United Kingdom", currency: "GBP" },
+    US: { name: "United States", currency: "USD" }
+};
+let exchangeRateCache = null;
+
+async function getUsdExchangeRates() {
+    if (exchangeRateCache && exchangeRateCache.expiresAt > Date.now()) {
+        return exchangeRateCache.rates;
+    }
+
+    const response = await fetch("https://open.er-api.com/v6/latest/USD", {
+        signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) {
+        throw new Error(`Exchange-rate service responded with ${response.status}.`);
+    }
+
+    const data = await response.json();
+    if (data.result !== "success" || !data.rates || typeof data.rates !== "object") {
+        throw new Error("Exchange-rate service returned invalid data.");
+    }
+
+    exchangeRateCache = {
+        rates: data.rates,
+        updatedAt: data.time_last_update_utc || new Date().toISOString(),
+        expiresAt: Date.now() + 12 * 60 * 60 * 1000
+    };
+    return exchangeRateCache.rates;
+}
+
 /*
 |--------------------------------------------------------------------------
 | FILE TYPES
@@ -355,7 +413,16 @@ You are Nexora AI.
 Answer clearly, accurately and helpfully.
 ${ageGuidance}
 
-If the user sends a brief greeting such as "hi" or "hello", reply with a brief, friendly greeting and invite them to ask what they need. Match the user's tone and answer the request directly without adding unrelated detail.
+If the user sends a brief greeting such as "hi" or "hello", answer in a warm, natural, conversational way. Briefly introduce yourself as Nexora AI, mention one or two things you can help with (such as writing, learning, or understanding uploaded files), and ask what they would like to work on. Keep it concise and do not turn a greeting into a sales pitch.
+
+If the user asks about Nexora subscriptions or pricing, explain the monthly plans accurately: Nexora Go is $10 USD/month, Nexora Pro is $25 USD/month, and Nexora Plus is $50 USD/month. The in-app pricing panel can display an approximate localized currency conversion based on the selected country. Do not invent plan benefits, taxes, exchange rates, or checkout availability.
+
+For a question with multiple parts or one that needs a lengthy explanation:
+- Start with a short "Summary" that answers the main question or states the key takeaway.
+- Then use clear headings and address each part of the request without skipping anything.
+- Prefer concise paragraphs, bullets for related points, and numbered steps for procedures.
+- Include useful details and examples, but avoid repetition, filler, or restating the question.
+For simple questions, answer directly without forcing a summary or headings. Follow the requested response style for depth while keeping the answer focused.
 
 If the user asks a school or technical problem:
 - Explain the important reasoning.
@@ -921,6 +988,54 @@ app.get("/config", (req, res) => {
             )
         ]
     });
+});
+
+app.get("/api/pricing", async (req, res) => {
+    const countryCode = String(req.query.country || "US").toUpperCase();
+    const country = PRICING_COUNTRIES[countryCode];
+    if (!country) {
+        return res.status(400).json({
+            message: "Choose a supported country to view localized pricing."
+        });
+    }
+
+    try {
+        const rates = country.currency === "USD"
+            ? { USD: 1 }
+            : await getUsdExchangeRates();
+        const rate = rates[country.currency];
+        if (!Number.isFinite(rate) || rate <= 0) {
+            throw new Error(`No exchange rate is available for ${country.currency}.`);
+        }
+
+        const fractionDigits = new Intl.NumberFormat("en", {
+            style: "currency",
+            currency: country.currency
+        }).resolvedOptions().maximumFractionDigits;
+
+        res.json({
+            country: { code: countryCode, name: country.name },
+            currency: country.currency,
+            exchangeRate: rate,
+            rateUpdatedAt: exchangeRateCache?.updatedAt || null,
+            countries: Object.entries(PRICING_COUNTRIES)
+                .map(([code, item]) => ({ code, name: item.name }))
+                .sort((left, right) => left.name.localeCompare(right.name)),
+            plans: PRICING_PLANS.map((plan) => ({
+                id: plan.id,
+                name: plan.name,
+                usdMonthly: plan.usdMonthly,
+                monthlyPrice: Number(
+                    (plan.usdMonthly * rate).toFixed(fractionDigits)
+                )
+            }))
+        });
+    } catch (error) {
+        console.error("Unable to load localized pricing:", error);
+        res.status(502).json({
+            message: "Localized pricing is temporarily unavailable. Please try again."
+        });
+    }
 });
 
 /*

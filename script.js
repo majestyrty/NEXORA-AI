@@ -4,11 +4,143 @@ const sendBtn = document.getElementById("sendBtn");
 const fileInput = document.getElementById("fileInput");
 const attachmentPreview = document.getElementById("attachmentPreview");
 const modelSelect = document.getElementById("modelSelect");
-const state = { files: [], conversations: JSON.parse(localStorage.getItem("nexora_chats") || "[]"), current: [], sending: false, config: null, user: null, provider: "gemini", authMode: "login", pendingSignup: null, headlineTimer: null };
+const state = { files: [], conversations: JSON.parse(localStorage.getItem("nexora_chats") || "[]"), current: [], sending: false, config: null, user: null, provider: "gemini", authMode: "login", pendingSignup: null, headlineTimer: null, welcomeAnimation: null, pricingCountry: localStorage.getItem("nexora_pricing_country") || "US", pricingRequestId: 0 };
 
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[char]));
 function formatText(text) { return escapeHtml(text).replace(/```([\s\S]*?)```/g, "<pre><code>$1</code></pre>").replace(/^### (.*)$/gm, "<h3>$1</h3>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br>"); }
 function timestamp() { return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
+function conversationTitle(record) {
+    const firstMessage = record.messages.find((item) => item.sender === "user")?.text?.trim();
+    if (!firstMessage) return record.title || "New conversation";
+    if (/^(hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening|thanks|thank you)[!.?,\s]*$/i.test(firstMessage)) return "Getting started";
+    return firstMessage.slice(0, 42);
+}
+function stopWelcomeParticles() {
+    if (!state.welcomeAnimation) return;
+    cancelAnimationFrame(state.welcomeAnimation.frame);
+    state.welcomeAnimation.observer.disconnect();
+    state.welcomeAnimation = null;
+}
+function startWelcomeParticles(canvas) {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const context = canvas.getContext("2d");
+    const particles = Array.from({ length: 42 }, () => ({
+        x: Math.random(),
+        y: Math.random(),
+        vx: (Math.random() - .5) * .00055,
+        vy: (Math.random() - .5) * .00055,
+        size: Math.random() * 1.6 + .6
+    }));
+    const resize = () => {
+        const bounds = canvas.getBoundingClientRect();
+        const scale = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.round(bounds.width * scale);
+        canvas.height = Math.round(bounds.height * scale);
+        context.setTransform(scale, 0, 0, scale, 0, 0);
+    };
+    const observer = new ResizeObserver(resize);
+    observer.observe(canvas);
+    resize();
+    const animation = { frame: 0, observer };
+    state.welcomeAnimation = animation;
+    const animate = () => {
+        if (state.welcomeAnimation !== animation) return;
+        const bounds = canvas.getBoundingClientRect();
+        context.clearRect(0, 0, bounds.width, bounds.height);
+        particles.forEach((particle, index) => {
+            particle.x += particle.vx;
+            particle.y += particle.vy;
+            if (particle.x < 0 || particle.x > 1) particle.vx *= -1;
+            if (particle.y < 0 || particle.y > 1) particle.vy *= -1;
+            const x = particle.x * bounds.width;
+            const y = particle.y * bounds.height;
+            context.fillStyle = "rgba(108, 190, 255, .78)";
+            context.beginPath();
+            context.arc(x, y, particle.size, 0, Math.PI * 2);
+            context.fill();
+            particles.slice(index + 1).forEach((other) => {
+                const dx = (particle.x - other.x) * bounds.width;
+                const dy = (particle.y - other.y) * bounds.height;
+                const distance = Math.hypot(dx, dy);
+                if (distance < 100) {
+                    context.strokeStyle = `rgba(77, 155, 244, ${.16 * (1 - distance / 100)})`;
+                    context.lineWidth = 1;
+                    context.beginPath();
+                    context.moveTo(x, y);
+                    context.lineTo(other.x * bounds.width, other.y * bounds.height);
+                    context.stroke();
+                }
+            });
+        });
+        animation.frame = requestAnimationFrame(animate);
+    };
+    animate();
+}
+function renderPricing(pricing) {
+    const grid = document.getElementById("pricingGrid");
+    if (!grid) return;
+    grid.replaceChildren();
+    pricing.plans.forEach((plan) => {
+        const card = document.createElement("article");
+        card.className = `pricing-card${plan.id === "pro" ? " featured" : ""}`;
+        const name = document.createElement("h3");
+        name.textContent = plan.name;
+        const price = document.createElement("p");
+        price.className = "pricing-amount";
+        price.textContent = new Intl.NumberFormat(undefined, {
+            style: "currency",
+            currency: pricing.currency,
+            maximumFractionDigits: 2
+        }).format(plan.monthlyPrice);
+        const cadence = document.createElement("span");
+        cadence.className = "pricing-cadence";
+        cadence.textContent = "/ month";
+        price.append(" ", cadence);
+        const basePrice = document.createElement("p");
+        basePrice.className = "pricing-base";
+        basePrice.textContent = `$${plan.usdMonthly} USD base price`;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "pricing-cta";
+        button.textContent = "Ask about this plan";
+        button.onclick = () => {
+            input.value = `Tell me about the ${plan.name} plan and its pricing.`;
+            updateSendState();
+            input.focus();
+        };
+        card.append(name, price, basePrice, button);
+        grid.appendChild(card);
+    });
+}
+async function loadPricing(countryCode = state.pricingCountry) {
+    const status = document.getElementById("pricingStatus");
+    const countrySelect = document.getElementById("pricingCountry");
+    if (!status || !countrySelect) return;
+    const requestId = ++state.pricingRequestId;
+    status.textContent = "Loading local pricing…";
+    try {
+        const response = await fetch(`/api/pricing?country=${encodeURIComponent(countryCode)}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || "Unable to load pricing.");
+        if (requestId !== state.pricingRequestId) return;
+        if (!countrySelect.options.length) {
+            data.countries.forEach((country) => {
+                const option = document.createElement("option");
+                option.value = country.code;
+                option.textContent = country.name;
+                countrySelect.appendChild(option);
+            });
+        }
+        countrySelect.value = data.country.code;
+        state.pricingCountry = data.country.code;
+        localStorage.setItem("nexora_pricing_country", state.pricingCountry);
+        renderPricing(data);
+        status.textContent = `Approximate ${data.currency} prices converted from USD. Taxes may vary by location.`;
+    } catch (error) {
+        if (requestId !== state.pricingRequestId) return;
+        status.textContent = error.message || "Unable to load pricing. Please try again.";
+    }
+}
 function addMessage(text, sender, files = [], time = timestamp()) {
     const message = document.createElement("article"); message.className = `message ${sender}`;
     const timeMarkup = window.NexoraSettings?.get("timestamps") === false ? "" : `<time>${time}</time>`;
@@ -18,17 +150,51 @@ function addMessage(text, sender, files = [], time = timestamp()) {
 }
 function saveConversation() {
     if (!state.current.length) return;
-    const title = state.current.find((item) => item.sender === "user")?.text.slice(0, 42) || "New conversation";
+    const title = conversationTitle({ messages: state.current, title: "New conversation" });
     const record = { id: state.current.id || crypto.randomUUID(), title, messages: state.current }; state.current.id = record.id;
     const existing = state.conversations.findIndex((item) => item.id === record.id); if (existing >= 0) state.conversations[existing] = record; else state.conversations.unshift(record);
     localStorage.setItem("nexora_chats", JSON.stringify(state.conversations.slice(0, 50))); renderConversations();
 }
 function renderConversations(filter = "") {
     const list = document.getElementById("convoList"); list.innerHTML = "";
-    state.conversations.filter((item) => `${item.title} ${item.messages.map((m) => m.text).join(" ")}`.toLowerCase().includes(filter.toLowerCase())).forEach((item) => { const button = document.createElement("button"); button.className = "convo-item"; button.textContent = item.title; button.onclick = () => loadConversation(item); list.appendChild(button); });
+    state.conversations.filter((item) => `${conversationTitle(item)} ${item.messages.map((m) => m.text).join(" ")}`.toLowerCase().includes(filter.toLowerCase())).forEach((item) => { const button = document.createElement("button"); button.className = "convo-item"; button.textContent = conversationTitle(item); if (item.id === state.current.id) { button.classList.add("active"); button.setAttribute("aria-current", "page"); } button.onclick = () => loadConversation(item); list.appendChild(button); });
 }
-function loadConversation(record) { chat.innerHTML = ""; state.current = record.messages; state.current.id = record.id; state.current.forEach((message) => addMessage(message.text, message.sender, [], message.time)); }
-function newChat() { chat.innerHTML = ""; state.current = []; state.files = []; renderAttachments(); addMessage("Welcome to Nexora AI. Ask a question or attach a file to get started.", "bot"); }
+function loadConversation(record) { stopWelcomeParticles(); chat.innerHTML = ""; state.current = record.messages; state.current.id = record.id; state.current.forEach((message) => addMessage(message.text, message.sender, [], message.time)); renderConversations(document.getElementById("searchChats").value); document.getElementById("sidebar").classList.remove("open"); }
+function renderWelcome() {
+    const firstName = state.user?.name?.trim().split(/\s+/)[0];
+    chat.innerHTML = `<section class="welcome-screen" aria-label="Start a conversation">
+        <canvas class="welcome-particles" aria-hidden="true"></canvas>
+        <div class="welcome-content">
+            <span class="welcome-kicker">YOUR AI WORKSPACE</span>
+            <h2>${firstName ? `Welcome, ${escapeHtml(firstName)}.` : "What can we explore today?"}</h2>
+            <p class="welcome-description">Think through an idea, create something new, or bring a file into the conversation.</p>
+            <div class="prompt-suggestions" aria-label="Suggested prompts">
+                <button type="button" data-prompt="Help me brainstorm a fresh idea for a project.">✦ Brainstorm an idea</button>
+                <button type="button" data-prompt="Help me write a clear, engaging first draft.">✎ Write a first draft</button>
+                <button type="button" data-prompt="I have a file to understand. What can you help me find in it?">⌕ Explore a file</button>
+            </div>
+            <div class="pricing-heading">
+                <div><span class="welcome-kicker">SIMPLE MONTHLY PLANS</span><h3>Choose your Nexora plan</h3></div>
+                <label for="pricingCountry">Country
+                    <select id="pricingCountry" aria-label="Choose your country for pricing"></select>
+                </label>
+            </div>
+            <div id="pricingGrid" class="pricing-grid" aria-live="polite"></div>
+            <p id="pricingStatus" class="pricing-status" role="status">Loading local pricing…</p>
+        </div>
+    </section>`;
+    startWelcomeParticles(chat.querySelector(".welcome-particles"));
+    chat.querySelectorAll("[data-prompt]").forEach((button) => {
+        button.addEventListener("click", () => {
+            input.value = button.dataset.prompt;
+            updateSendState();
+            input.focus();
+        });
+    });
+    chat.querySelector("#pricingCountry").addEventListener("change", (event) => loadPricing(event.target.value));
+    loadPricing(state.pricingCountry);
+}
+function newChat() { stopWelcomeParticles(); chat.innerHTML = ""; state.current = []; state.files = []; input.value = ""; document.getElementById("fileError").textContent = ""; renderAttachments(); renderConversations(document.getElementById("searchChats").value); document.getElementById("sidebar").classList.remove("open"); renderWelcome(); }
 function renderAttachments() {
     attachmentPreview.innerHTML = "";
     state.files.forEach((file, index) => {
@@ -47,8 +213,8 @@ function setUser(user) {
     ["userEmail", "settingsUserEmail"].forEach((id) => document.getElementById(id).textContent = user.email || "");
     ["userAvatar", "settingsAvatar"].forEach((id) => { const image = document.getElementById(id); image.src = avatar || "logo.png"; image.alt = `${name} profile`; });
 }
-function showAuthScreen(message = "") { document.body.classList.add("auth-checking"); document.getElementById("authScreen").hidden = false; document.getElementById("authError").textContent = message; animateWelcomeHeadline(); }
-function showApp() { document.body.classList.remove("auth-checking"); document.getElementById("authScreen").hidden = true; }
+function showAuthScreen(message = "") { document.body.classList.add("auth-checking"); document.getElementById("appLoader").hidden = true; document.getElementById("authScreen").hidden = false; document.getElementById("authError").textContent = message; animateWelcomeHeadline(); }
+function showApp() { document.body.classList.remove("auth-checking"); document.getElementById("appLoader").hidden = true; document.getElementById("authScreen").hidden = true; }
 function animateWelcomeHeadline() {
     const headline = document.getElementById("welcomeHeadline");
     if (!headline || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -127,17 +293,19 @@ async function handleUnauthorized() { state.user = null; showAuthScreen("Your se
 async function loadConfig() {
     state.config = await fetchWithTimeout("/config").then((response) => response.json());
     const savedProvider = localStorage.getItem("nexora_provider") || "gemini"; state.provider = state.config.providers[savedProvider] ? savedProvider : Object.keys(state.config.providers)[0];
-    populateModels(localStorage.getItem("nexora_selected_model"));
+    populateModels(localStorage.getItem(`nexora_selected_model_${state.provider}`) || localStorage.getItem("nexora_selected_model"));
 }
 function populateModels(preferred) {
     const models = state.config.providers[state.provider].models; modelSelect.innerHTML = models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join("");
-    modelSelect.value = models.includes(preferred) ? preferred : models[0]; localStorage.setItem("nexora_provider", state.provider); localStorage.setItem("nexora_selected_model", modelSelect.value);
+    modelSelect.value = models.includes(preferred) ? preferred : models[0]; localStorage.setItem("nexora_provider", state.provider); localStorage.setItem(`nexora_selected_model_${state.provider}`, modelSelect.value); localStorage.setItem("nexora_selected_model", modelSelect.value);
     document.getElementById("statusModel").textContent = providerModelLabel();
     const providerSelect = document.getElementById("providerSelect"); if (providerSelect) providerSelect.value = state.provider;
     const settingsModels = document.getElementById("settingsModelSelect"); if (settingsModels) { settingsModels.innerHTML = models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join(""); settingsModels.value = modelSelect.value; }
 }
 async function sendMessage() {
     if (state.sending || (!input.value.trim() && !state.files.length)) return;
+    stopWelcomeParticles();
+    chat.querySelector(".welcome-screen")?.remove();
     const text = input.value.trim(); const files = [...state.files]; addMessage(text || "Please analyze these files.", "user", files); state.current.push({ text: text || "Please analyze these files.", sender: "user", time: timestamp() });
     input.value = ""; state.files = []; renderAttachments(); setSending(true);
     const bot = document.createElement("article"); bot.className = "message bot"; bot.innerHTML = '<div class="message-meta">✦ Nexora AI</div><div class="message-content thinking" role="status" aria-label="Nexora AI is responding"><span></span><span></span><span></span></div>'; chat.appendChild(bot);
@@ -173,8 +341,8 @@ fileInput.onchange = () => {
 input.oninput = updateSendState;
 input.onkeydown = (event) => { if (event.key === "Enter" && !event.shiftKey && window.NexoraSettings.get("enter")) { event.preventDefault(); sendMessage(); } };
 sendBtn.onclick = sendMessage; document.getElementById("newChatBtn").onclick = newChat; document.getElementById("searchChats").oninput = (event) => renderConversations(event.target.value); document.getElementById("mobileMenuBtn").onclick = () => document.getElementById("sidebar").classList.toggle("open");
-document.getElementById("modelSelect").onchange = () => { localStorage.setItem("nexora_selected_model", modelSelect.value); document.getElementById("statusModel").textContent = providerModelLabel(); };
-window.addEventListener("nexora-provider-change", (event) => { state.provider = event.detail; populateModels(); });
+document.getElementById("modelSelect").onchange = () => { localStorage.setItem(`nexora_selected_model_${state.provider}`, modelSelect.value); localStorage.setItem("nexora_selected_model", modelSelect.value); document.getElementById("statusModel").textContent = providerModelLabel(); document.getElementById("settingsModelSelect").value = modelSelect.value; };
+window.addEventListener("nexora-provider-change", (event) => { state.provider = event.detail; populateModels(localStorage.getItem(`nexora_selected_model_${state.provider}`)); });
 document.getElementById("logoutBtn").onclick = () => document.getElementById("settingsLogoutBtn").click();
 document.getElementById("loginModeButton").onclick = () => setAuthMode("login");
 document.getElementById("signupModeButton").onclick = () => setAuthMode("signup");

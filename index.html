@@ -4,10 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nexora AI</title>
-    <link rel="stylesheet" href="style.css?v=4">
+    <link rel="stylesheet" href="style.css?v=6">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body class="auth-checking">
+    <div id="appLoader" class="app-loader" role="status" aria-label="Loading Nexora AI">
+        <span class="loader-spinner" aria-hidden="true"></span>
+        <span>Loading</span>
+    </div>
     <section id="authScreen" class="auth-screen" hidden>
         <div class="auth-card">
             <img src="logo.png" alt="Nexora AI" class="auth-logo">
@@ -76,6 +80,6 @@
             <section class="chat-management"><h3>Chat management</h3><button id="clearChatBtn" class="secondary-btn">Clear current chat</button><button id="clearAllBtn" class="secondary-btn danger">Clear all local chats</button><button id="exportBtn" class="secondary-btn">Export chat</button></section>
         </aside>
     </div>
-    <script src="particles.js?v=3"></script><script src="settings.js?v=3"></script><script src="script.js?v=4"></script>
+    <script src="particles.js?v=3"></script><script src="settings.js?v=3"></script><script src="script.js?v=5"></script>
 </body>
 </html>
