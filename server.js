@@ -22,7 +22,12 @@ const DEPLOYMENT_HOST = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env
 const DEFAULT_APP_BASE_URL = DEPLOYMENT_HOST
     ? `https://${DEPLOYMENT_HOST}`
     : `http://localhost:${PORT}`;
-const APP_BASE_URL = (process.env.APP_BASE_URL || DEFAULT_APP_BASE_URL).replace(/\/$/, "");
+const CONFIGURED_APP_BASE_URL = process.env.APP_BASE_URL?.trim();
+const USE_DEPLOYMENT_BASE_URL = DEPLOYMENT_HOST &&
+    (!CONFIGURED_APP_BASE_URL || !/^https:\/\//i.test(CONFIGURED_APP_BASE_URL));
+const APP_BASE_URL = (USE_DEPLOYMENT_BASE_URL
+    ? DEFAULT_APP_BASE_URL
+    : CONFIGURED_APP_BASE_URL || DEFAULT_APP_BASE_URL).replace(/\/$/, "");
 const APP_ORIGIN = new URL(APP_BASE_URL).origin;
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || "";
 const ALLOW_GUEST_ACCESS = process.env.ALLOW_GUEST_ACCESS === "true";
@@ -40,14 +45,12 @@ const MICROSOFT_CLIENT_SECRET = process.env.MICROSOFT_CLIENT_SECRET || "";
 const MICROSOFT_TENANT = process.env.MICROSOFT_TENANT || "common";
 const MICROSOFT_AUTHORITY = `https://login.microsoftonline.com/${encodeURIComponent(MICROSOFT_TENANT)}`;
 const SESSION_SECRET = process.env.SESSION_SECRET || "";
+const SESSION_SECRET_CONFIGURED = Buffer.byteLength(SESSION_SECRET) >= 32;
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 const SessionStore = createMemoryStore(session);
 const SESSION_COOKIE_NAME = IS_PRODUCTION ? "__Host-nexora.sid" : "nexora.sid";
 
-if (IS_PRODUCTION && (!SESSION_SECRET || Buffer.byteLength(SESSION_SECRET) < 32)) {
-    throw new Error("Production requires SESSION_SECRET to be set to a secret with at least 32 bytes in the deployment environment.");
-}
 if (IS_PRODUCTION && new URL(APP_BASE_URL).protocol !== "https:") {
     throw new Error("Production requires APP_BASE_URL to use HTTPS.");
 }
@@ -270,7 +273,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "32kb" }));
 app.use(session({
     name: SESSION_COOKIE_NAME,
-    secret: SESSION_SECRET || crypto.randomBytes(32).toString("hex"),
+    secret: SESSION_SECRET_CONFIGURED ? SESSION_SECRET : crypto.randomBytes(32).toString("hex"),
     store: new SessionStore({ checkPeriod: 86400000 }),
     resave: false,
     saveUninitialized: false,
@@ -306,20 +309,38 @@ app.use((req, res, next) => {
 if (!GOOGLE_CLIENT_ID) {
     console.warn("GOOGLE_CLIENT_ID is not configured. Google sign-in is unavailable.");
 }
-if (!SESSION_SECRET) {
-    console.warn("SESSION_SECRET is not configured. A temporary random development secret will be used.");
+if (!SESSION_SECRET_CONFIGURED) {
+    console.warn(IS_PRODUCTION
+        ? "SESSION_SECRET is missing or shorter than 32 bytes. Authentication is disabled until it is configured."
+        : "SESSION_SECRET is not configured. A temporary random development secret will be used.");
 }
 if (IS_PRODUCTION) {
     console.warn("Use a persistent shared session store in production; the configured in-memory store is for development only.");
 }
 
 function requireAuth(req, res, next) {
+    if (IS_PRODUCTION && !SESSION_SECRET_CONFIGURED) {
+        return res.status(503).json({
+            error: "SESSION_SECRET_REQUIRED",
+            message: "Authentication is temporarily unavailable. Configure SESSION_SECRET on the server and redeploy."
+        });
+    }
     if (req.session.user) return next();
     if (req.method === "GET") {
         return res.redirect(`/?redirect=${encodeURIComponent(req.originalUrl)}`);
     }
     return res.status(401).json({ error: "NOT_AUTHENTICATED", message: "Please sign in to continue." });
 }
+
+app.use("/auth", (req, res, next) => {
+    if (IS_PRODUCTION && !SESSION_SECRET_CONFIGURED) {
+        return res.status(503).json({
+            error: "SESSION_SECRET_REQUIRED",
+            message: "Authentication is temporarily unavailable. Configure SESSION_SECRET on the server and redeploy."
+        });
+    }
+    return next();
+});
 
 function regenerateSession(req) {
     return new Promise((resolve, reject) => {
@@ -1530,6 +1551,15 @@ app.get("/config", publicApiRateLimit, (req, res) => {
     });
 });
 
+app.get("/api/health", publicApiRateLimit, (req, res) => {
+    res.json({
+        status: "ok",
+        environment: IS_PRODUCTION ? "production" : "development",
+        sessionSecretConfigured: SESSION_SECRET_CONFIGURED,
+        paymentProviderConfigured: Boolean(PAYSTACK_SECRET_KEY)
+    });
+});
+
 app.get("/api/pricing", pricingRateLimit, async (req, res) => {
     const countryCode = String(req.query.country || "US").toUpperCase();
     const country = PRICING_COUNTRIES[countryCode];
@@ -1864,8 +1894,12 @@ app.use(
 |--------------------------------------------------------------------------
 */
 
-app.listen(PORT, () => {
-    console.log(
-        `NEXORA AI running at http://localhost:${PORT}`
-    );
-});
+export default app;
+
+if (!process.env.VERCEL) {
+    app.listen(PORT, () => {
+        console.log(
+            `NEXORA AI running at http://localhost:${PORT}`
+        );
+    });
+}
