@@ -7,7 +7,136 @@ const modelSelect = document.getElementById("modelSelect");
 const state = { files: [], conversations: JSON.parse(localStorage.getItem("nexora_chats") || "[]"), current: [], sending: false, config: null, user: null, provider: "gemini", authMode: "login", pendingSignup: null, emailAuthSession: null, headlineTimer: null, welcomeAnimation: null, pricingCountry: localStorage.getItem("nexora_pricing_country") || "US", pricingRequestId: 0, billingPlan: null, pendingPayment: null };
 
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[char]));
-function formatText(text) { return escapeHtml(text).replace(/```([\s\S]*?)```/g, "<pre><code>$1</code></pre>").replace(/^### (.*)$/gm, "<h3>$1</h3>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br>"); }
+function formatInlineMarkdown(text) {
+    const tokens = [];
+    const stash = (html) => {
+        const index = tokens.push(html) - 1;
+        return `\u0000${index}\u0000`;
+    };
+    let html = escapeHtml(text);
+
+    html = html.replace(/`([^`\n]+)`/g, (_, code) => stash(`<code>${code}</code>`));
+    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) =>
+        stash(`<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`));
+    html = html.replace(/\*\*(.+?)\*\*|__(.+?)__/g, (_, a, b) => `<strong>${a || b}</strong>`);
+    html = html.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+    html = html.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, "$1<em>$2</em>");
+
+    return html.replace(/\u0000(\d+)\u0000/g, (_, index) => tokens[Number(index)]);
+}
+
+function isMarkdownBlockStart(lines, index) {
+    const line = lines[index] || "";
+    return /^\s*$/.test(line) ||
+        /^ {0,3}#{1,6}\s+/.test(line) ||
+        /^ {0,3}```/.test(line) ||
+        /^ {0,3}>/.test(line) ||
+        /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/.test(line) ||
+        /^ {0,3}(?:[-+*]|\d+[.)])\s+/.test(line) ||
+        (line.includes("|") && (lines[index + 1] || "").includes("|"));
+}
+
+function parseMarkdownTableRow(line) {
+    return line.trim().replace(/^\|/, "").replace(/\|$/, "")
+        .split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/\\\|/g, "|"));
+}
+
+function formatText(text) {
+    const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
+    const blocks = [];
+    let index = 0;
+
+    while (index < lines.length) {
+        const line = lines[index];
+        if (!line.trim()) {
+            index += 1;
+            continue;
+        }
+
+        const fence = line.match(/^ {0,3}```([\w+-]*)\s*$/);
+        if (fence) {
+            const code = [];
+            index += 1;
+            while (index < lines.length && !/^ {0,3}```\s*$/.test(lines[index])) {
+                code.push(lines[index]);
+                index += 1;
+            }
+            if (index < lines.length) index += 1;
+            const language = fence[1] ? ` class="language-${escapeHtml(fence[1])}"` : "";
+            blocks.push(`<pre><code${language}>${escapeHtml(code.join("\n"))}</code></pre>`);
+            continue;
+        }
+
+        const heading = line.match(/^ {0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
+        if (heading) {
+            const level = heading[1].length;
+            blocks.push(`<h${level}>${formatInlineMarkdown(heading[2])}</h${level}>`);
+            index += 1;
+            continue;
+        }
+
+        if (index + 1 < lines.length && line.includes("|") && lines[index + 1].includes("|") &&
+            /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[index + 1])) {
+            const headers = parseMarkdownTableRow(line);
+            index += 2;
+            const rows = [];
+            while (index < lines.length && lines[index].includes("|") && lines[index].trim()) {
+                rows.push(parseMarkdownTableRow(lines[index]));
+                index += 1;
+            }
+            const headerHtml = headers.map((cell) => `<th scope="col">${formatInlineMarkdown(cell)}</th>`).join("");
+            const rowHtml = rows.map((row) =>
+                `<tr>${headers.map((_, column) => `<td>${formatInlineMarkdown(row[column] || "")}</td>`).join("")}</tr>`
+            ).join("");
+            blocks.push(`<div class="markdown-table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table><thead><tr>${headerHtml}</tr></thead><tbody>${rowHtml}</tbody></table></div>`);
+            continue;
+        }
+
+        if (/^ {0,3}([-*_])(?:\s*\1){2,}\s*$/.test(line)) {
+            blocks.push("<hr>");
+            index += 1;
+            continue;
+        }
+
+        if (/^ {0,3}>/.test(line)) {
+            const quote = [];
+            while (index < lines.length && /^ {0,3}>/.test(lines[index])) {
+                quote.push(lines[index].replace(/^ {0,3}>\s?/, ""));
+                index += 1;
+            }
+            blocks.push(`<blockquote>${formatText(quote.join("\n"))}</blockquote>`);
+            continue;
+        }
+
+        const listMatch = line.match(/^ {0,3}([-+*]|\d+[.)])\s+(.+)$/);
+        if (listMatch) {
+            const ordered = /^\d/.test(listMatch[1]);
+            const listItems = [];
+            while (index < lines.length) {
+                const item = lines[index].match(/^ {0,3}([-+*]|\d+[.)])\s+(.+)$/);
+                if (!item || /^\d/.test(item[1]) !== ordered) break;
+                listItems.push(`<li>${formatInlineMarkdown(item[2])}</li>`);
+                index += 1;
+            }
+            const tag = ordered ? "ol" : "ul";
+            blocks.push(`<${tag}>${listItems.join("")}</${tag}>`);
+            continue;
+        }
+
+        const paragraph = [];
+        while (index < lines.length && !isMarkdownBlockStart(lines, index)) {
+            paragraph.push(lines[index]);
+            index += 1;
+        }
+        if (!paragraph.length) {
+            paragraph.push(lines[index]);
+            index += 1;
+        }
+        blocks.push(`<p>${paragraph.map((part) => formatInlineMarkdown(part.trim())).join(" ")}</p>`);
+    }
+
+    return blocks.join("");
+}
 function timestamp() { return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
 function conversationTitle(record) {
     const firstMessage = record.messages.find((item) => item.sender === "user")?.text?.trim();
@@ -603,18 +732,32 @@ async function sendMessage() {
     const text = input.value.trim(); const files = [...state.files]; addMessage(text || "Please analyze these files.", "user", files); state.current.push({ text: text || "Please analyze these files.", sender: "user", time: timestamp() });
     input.value = ""; state.files = []; renderAttachments(); setSending(true);
     const bot = document.createElement("article"); bot.className = "message bot"; bot.innerHTML = '<div class="message-meta">✦ Nexora AI</div><div class="message-content thinking" role="status" aria-label="Nexora AI is responding"><span></span><span></span><span></span></div>'; chat.appendChild(bot);
+    const responseContent = bot.querySelector(".message-content");
+    let streamFrame = 0;
     try {
         let reply = "";
+        const previewStream = () => {
+            if (streamFrame) return;
+            streamFrame = requestAnimationFrame(() => {
+                streamFrame = 0;
+                responseContent.classList.remove("thinking");
+                responseContent.classList.add("is-streaming");
+                responseContent.textContent = reply;
+            });
+        };
         const query = `message=${encodeURIComponent(text)}&provider=${encodeURIComponent(state.provider)}&model=${encodeURIComponent(modelSelect.value)}&responseStyle=${encodeURIComponent(window.NexoraSettings.get("responseStyle"))}`;
         if (!files.length && window.NexoraSettings.get("stream")) {
             const es = new EventSource(`/stream?${query}`);
-            await new Promise((resolve, reject) => { es.onmessage = (event) => { const payload = JSON.parse(event.data); if (payload.type === "partial") { reply += payload.text; bot.querySelector(".message-content").innerHTML = formatText(reply); } if (payload.type === "done") { es.close(); resolve(); } if (payload.type === "error") { es.close(); reject(new Error(payload.message)); } }; es.onerror = () => { es.close(); reject(new Error("network")); }; });
+            await new Promise((resolve, reject) => { es.onmessage = (event) => { const payload = JSON.parse(event.data); if (payload.type === "partial") { reply += payload.text; previewStream(); } if (payload.type === "done") { es.close(); resolve(); } if (payload.type === "error") { es.close(); reject(new Error(payload.message)); } }; es.onerror = () => { es.close(); reject(new Error("network")); }; });
         } else {
             const form = new FormData(); form.append("message", text); form.append("provider", state.provider); form.append("model", modelSelect.value); form.append("responseStyle", window.NexoraSettings.get("responseStyle")); files.forEach((file) => form.append("attachments", file, file.name));
-            const response = await fetch("/chat", { method: "POST", body: form }); const data = await response.json(); if (response.status === 401) return handleUnauthorized(); if (!response.ok) throw new Error(data.reply); reply = data.reply; bot.querySelector(".message-content").innerHTML = formatText(reply);
+            const response = await fetch("/chat", { method: "POST", body: form }); const data = await response.json(); if (response.status === 401) return handleUnauthorized(); if (!response.ok) throw new Error(data.reply); reply = data.reply;
         }
+        if (streamFrame) cancelAnimationFrame(streamFrame);
+        responseContent.classList.remove("thinking", "is-streaming");
+        responseContent.innerHTML = formatText(reply);
         bot.querySelector(".message-meta").innerHTML += ` <time>${timestamp()}</time>`; state.current.push({ text: reply, sender: "bot", time: timestamp() }); saveConversation();
-    } catch (error) { bot.querySelector(".message-content").textContent = error.message === "network" ? "Nexora AI is having trouble connecting. Please check your connection and try again." : error.message; } finally { setSending(false); }
+    } catch (error) { if (streamFrame) cancelAnimationFrame(streamFrame); responseContent.classList.remove("thinking", "is-streaming"); responseContent.textContent = error.message === "network" ? "Nexora AI is having trouble connecting. Please check your connection and try again." : error.message; } finally { setSending(false); }
 }
 document.getElementById("attachBtn").onclick = () => fileInput.click();
 fileInput.onchange = () => {

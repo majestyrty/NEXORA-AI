@@ -16,7 +16,12 @@ import OpenAI from "openai";
 import { OAuth2Client } from "google-auth-library";
 
 dotenv.config();
+dotenv.config();
 
+console.log("SESSION_SECRET STATUS:", {
+    loaded: !!process.env.SESSION_SECRET,
+    length: process.env.SESSION_SECRET?.length || 0
+});
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DEPLOYMENT_HOST = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
