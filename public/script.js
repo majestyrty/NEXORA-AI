@@ -381,10 +381,11 @@ function processPaymentReturn() {
     }
     verifyCheckout(reference);
 }
-function addMessage(text, sender, files = [], time = timestamp()) {
+function addMessage(text, sender, files = [], time = timestamp(), model = "") {
     const message = document.createElement("article"); message.className = `message ${sender}`;
     const timeMarkup = window.NexoraSettings?.get("timestamps") === false ? "" : `<time>${time}</time>`;
-    message.innerHTML = `<div class="message-meta">${sender === "bot" ? "✦ Nexora AI" : "You"} ${timeMarkup}</div><div class="message-content">${formatText(text)}</div>`;
+    const assistantName = model === "nex-n1-gpt-6-luna" ? "NEX N1" : "Nexora AI";
+    message.innerHTML = `<div class="message-meta">${sender === "bot" ? `✦ ${assistantName}` : "You"} ${timeMarkup}</div><div class="message-content">${formatText(text)}</div>`;
     if (files.length) { const list = document.createElement("div"); list.className = "message-files"; files.forEach((file) => { const item = document.createElement("span"); item.textContent = `📎 ${file.name}`; list.appendChild(item); }); message.appendChild(list); }
     chat.appendChild(message); if (window.NexoraSettings?.get("scroll")) chat.scrollTop = chat.scrollHeight;
 }
@@ -399,7 +400,7 @@ function renderConversations(filter = "") {
     const list = document.getElementById("convoList"); list.innerHTML = "";
     state.conversations.filter((item) => `${conversationTitle(item)} ${item.messages.map((m) => m.text).join(" ")}`.toLowerCase().includes(filter.toLowerCase())).forEach((item) => { const button = document.createElement("button"); button.className = "convo-item"; button.textContent = conversationTitle(item); if (item.id === state.current.id) { button.classList.add("active"); button.setAttribute("aria-current", "page"); } button.onclick = () => loadConversation(item); list.appendChild(button); });
 }
-function loadConversation(record) { stopWelcomeParticles(); chat.innerHTML = ""; state.current = record.messages; state.current.id = record.id; state.current.forEach((message) => addMessage(message.text, message.sender, [], message.time)); renderConversations(document.getElementById("searchChats").value); document.getElementById("sidebar").classList.remove("open"); }
+function loadConversation(record) { stopWelcomeParticles(); chat.innerHTML = ""; state.current = record.messages; state.current.id = record.id; state.current.forEach((message) => addMessage(message.text, message.sender, [], message.time, message.model)); renderConversations(document.getElementById("searchChats").value); document.getElementById("sidebar").classList.remove("open"); }
 function renderWelcome() {
     const firstName = state.user?.name?.trim().split(/\s+/)[0];
     chat.innerHTML = `<section class="welcome-screen" aria-label="Start a conversation">
@@ -452,7 +453,15 @@ function renderAttachments() {
 }
 function updateSendState() { sendBtn.disabled = state.sending || (!input.value.trim() && !state.files.length); }
 function setSending(value) { state.sending = value; sendBtn.disabled = value; sendBtn.innerHTML = value ? '<span class="send-spinner" aria-hidden="true"></span>' : '<span class="send-icon" aria-hidden="true">↑</span>'; if (!value) updateSendState(); }
-function providerModelLabel() { const option = modelSelect.options[modelSelect.selectedIndex]; return `${state.provider === "openai" ? "OpenAI" : "Gemini"} · ${option?.text || ""}`; }
+function modelDisplayName(model) {
+    return state.config?.providers?.openai?.modelLabels?.[model] || model;
+}
+function providerModelLabel() {
+    const option = modelSelect.options[modelSelect.selectedIndex];
+    return option?.value === "nex-n1-gpt-6-luna"
+        ? modelDisplayName(option.value)
+        : `${state.provider === "openai" ? "OpenAI" : "Gemini"} · ${option?.text || ""}`;
+}
 function setUser(user) {
     state.user = user; const name = user.name || "Nexora user"; const avatar = user.picture || "";
     ["userName", "settingsUserName"].forEach((id) => document.getElementById(id).textContent = name);
@@ -525,22 +534,47 @@ function renderMicrosoftButton() {
         ? state.authMode === "signup" ? "Sign up with Microsoft" : "Continue with Microsoft"
         : "Microsoft sign-in unavailable";
 }
+function renderEmailAuthButton() {
+    const button = document.getElementById("emailAuthButton");
+    const hint = document.getElementById("emailAuthHint");
+    const resetting = state.authMode === "reset";
+    const configured = Boolean(state.config?.emailAuthConfigured);
+    button.disabled = !configured;
+    button.textContent = resetting
+        ? "Send password reset code"
+        : state.authMode === "signup" ? "Create account with email" : "Continue with email";
+    hint.textContent = configured
+        ? resetting
+            ? "Enter your email, request a reset code, then enter the code and your new password."
+            : "If eligible, we will email a 6-digit code."
+        : "Email sign-in is unavailable because the server email provider is not configured.";
+}
 function setAuthMode(mode) {
     state.authMode = mode;
     const signingUp = mode === "signup";
+    const resetting = mode === "reset";
     document.getElementById("signupFields").hidden = !signingUp;
-    document.getElementById("loginModeButton").classList.toggle("active", !signingUp);
+    document.getElementById("loginModeButton").classList.toggle("active", mode === "login");
     document.getElementById("signupModeButton").classList.toggle("active", signingUp);
-    document.getElementById("loginModeButton").setAttribute("aria-pressed", String(!signingUp));
+    document.getElementById("loginModeButton").setAttribute("aria-pressed", String(mode === "login"));
     document.getElementById("signupModeButton").setAttribute("aria-pressed", String(signingUp));
-    document.getElementById("authCopy").textContent = signingUp ? "Create your Nexora account and personalize your AI experience." : "Sign in to bring your conversations, files, and AI tools together.";
+    document.getElementById("authCopy").textContent = signingUp
+        ? "Create your Nexora account and personalize your AI experience."
+        : resetting
+            ? "Request a code to reset your email account password."
+            : "Sign in to bring your conversations, files, and AI tools together.";
+    document.getElementById("passwordLabel").textContent = resetting ? "New password" : "Password";
+    document.getElementById("passwordInput").autocomplete = resetting || signingUp ? "new-password" : "current-password";
+    document.getElementById("passwordInput").placeholder = resetting ? "Choose a new password" : "Enter a secure password";
+    document.getElementById("forgotPasswordButton").hidden = signingUp || resetting;
     document.getElementById("googleSignInButton").textContent = signingUp ? "Sign up with Google" : "Continue with Google";
     renderMicrosoftButton();
-    document.getElementById("emailAuthButton").textContent = signingUp ? "Create account with email" : "Continue with email";
-    document.getElementById("emailAuthHint").textContent = "We will send a 6-digit code to your email.";
+    renderEmailAuthButton();
     document.getElementById("otpFields").hidden = true;
     document.getElementById("verifyOtpButton").hidden = true;
     document.getElementById("otpInput").value = "";
+    document.getElementById("verifyOtpButton").textContent = "Verify code";
+    state.emailAuthSession = null;
     document.getElementById("authError").textContent = "";
 }
 function beginGoogleSignIn() {
@@ -611,12 +645,17 @@ async function beginEmailAuth() {
     const password = passwordInput.value;
     const mode = state.authMode;
 
+    if (!state.config?.emailAuthConfigured) {
+        document.getElementById("authError").textContent = "Email sign-in is not configured on the server yet.";
+        return;
+    }
+
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         document.getElementById("authError").textContent = "Enter a valid email address.";
         emailInput.focus();
         return;
     }
-    if (password.length < 8 || password.length > 128) {
+    if (mode !== "reset" && (password.length < 8 || password.length > 128)) {
         document.getElementById("authError").textContent = "Choose a password between 8 and 128 characters.";
         passwordInput.focus();
         return;
@@ -662,16 +701,15 @@ async function beginEmailAuth() {
         const verifyButton = document.getElementById("verifyOtpButton");
         otpFields.hidden = false;
         verifyButton.hidden = false;
-        document.getElementById("emailAuthHint").textContent = data.debugCode
-            ? `Code sent. Demo verification code: ${data.debugCode}`
-            : data.message;
+        document.getElementById("emailAuthHint").textContent = data.message;
         document.getElementById("otpInput").focus();
         state.emailAuthSession = { email, mode };
+        verifyButton.textContent = mode === "reset" ? "Reset password" : "Verify code";
     } catch (error) {
         document.getElementById("authError").textContent = error.message || "Unable to send a verification code.";
     } finally {
         submitButton.disabled = false;
-        submitButton.textContent = state.authMode === "signup" ? "Create account with email" : "Continue with email";
+        renderEmailAuthButton();
     }
 }
 async function verifyEmailCode() {
@@ -688,6 +726,14 @@ async function verifyEmailCode() {
         otpInput.focus();
         return;
     }
+    if (session.mode === "reset") {
+        const newPassword = document.getElementById("passwordInput").value;
+        if (newPassword.length < 8 || newPassword.length > 128) {
+            document.getElementById("authError").textContent = "Choose a new password between 8 and 128 characters.";
+            document.getElementById("passwordInput").focus();
+            return;
+        }
+    }
 
     const verifyButton = document.getElementById("verifyOtpButton");
     verifyButton.disabled = true;
@@ -699,7 +745,12 @@ async function verifyEmailCode() {
             method: "POST",
             credentials: "same-origin",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email: session.email, code })
+            body: JSON.stringify({
+                email: session.email,
+                code,
+                mode: session.mode,
+                newPassword: session.mode === "reset" ? document.getElementById("passwordInput").value : undefined
+            })
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.message || "Unable to verify the code.");
@@ -709,7 +760,7 @@ async function verifyEmailCode() {
         document.getElementById("authError").textContent = error.message || "Verification failed.";
     } finally {
         verifyButton.disabled = false;
-        verifyButton.textContent = "Verify code";
+        verifyButton.textContent = session?.mode === "reset" ? "Reset password" : "Verify code";
     }
 }
 async function handleUnauthorized() { state.user = null; showAuthScreen("Your session expired. Please sign in again."); if (window.google?.accounts?.id) window.google.accounts.id.disableAutoSelect(); renderGoogleButton(); renderMicrosoftButton(); }
@@ -719,11 +770,11 @@ async function loadConfig() {
     populateModels(localStorage.getItem(`nexora_selected_model_${state.provider}`) || localStorage.getItem("nexora_selected_model"));
 }
 function populateModels(preferred) {
-    const models = state.config.providers[state.provider].models; modelSelect.innerHTML = models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join("");
+    const models = state.config.providers[state.provider].models; modelSelect.innerHTML = models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(modelDisplayName(model))}</option>`).join("");
     modelSelect.value = models.includes(preferred) ? preferred : models[0]; localStorage.setItem("nexora_provider", state.provider); localStorage.setItem(`nexora_selected_model_${state.provider}`, modelSelect.value); localStorage.setItem("nexora_selected_model", modelSelect.value);
     document.getElementById("statusModel").textContent = providerModelLabel();
     const providerSelect = document.getElementById("providerSelect"); if (providerSelect) providerSelect.value = state.provider;
-    const settingsModels = document.getElementById("settingsModelSelect"); if (settingsModels) { settingsModels.innerHTML = models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join(""); settingsModels.value = modelSelect.value; }
+    const settingsModels = document.getElementById("settingsModelSelect"); if (settingsModels) { settingsModels.innerHTML = models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(modelDisplayName(model))}</option>`).join(""); settingsModels.value = modelSelect.value; }
 }
 async function sendMessage() {
     if (state.sending || (!input.value.trim() && !state.files.length)) return;
@@ -731,7 +782,9 @@ async function sendMessage() {
     chat.querySelector(".welcome-screen")?.remove();
     const text = input.value.trim(); const files = [...state.files]; addMessage(text || "Please analyze these files.", "user", files); state.current.push({ text: text || "Please analyze these files.", sender: "user", time: timestamp() });
     input.value = ""; state.files = []; renderAttachments(); setSending(true);
-    const bot = document.createElement("article"); bot.className = "message bot"; bot.innerHTML = '<div class="message-meta">✦ Nexora AI</div><div class="message-content thinking" role="status" aria-label="Nexora AI is responding"><span></span><span></span><span></span></div>'; chat.appendChild(bot);
+    const selectedModel = modelSelect.value;
+    const assistantName = selectedModel === "nex-n1-gpt-6-luna" ? "NEX N1" : "Nexora AI";
+    const bot = document.createElement("article"); bot.className = "message bot"; bot.innerHTML = `<div class="message-meta">✦ ${assistantName}</div><div class="message-content thinking" role="status" aria-label="${assistantName} is responding"><span></span><span></span><span></span></div>`; chat.appendChild(bot);
     const responseContent = bot.querySelector(".message-content");
     let streamFrame = 0;
     try {
@@ -756,7 +809,7 @@ async function sendMessage() {
         if (streamFrame) cancelAnimationFrame(streamFrame);
         responseContent.classList.remove("thinking", "is-streaming");
         responseContent.innerHTML = formatText(reply);
-        bot.querySelector(".message-meta").innerHTML += ` <time>${timestamp()}</time>`; state.current.push({ text: reply, sender: "bot", time: timestamp() }); saveConversation();
+        bot.querySelector(".message-meta").innerHTML += ` <time>${timestamp()}</time>`; state.current.push({ text: reply, sender: "bot", time: timestamp(), model: selectedModel }); saveConversation();
     } catch (error) { if (streamFrame) cancelAnimationFrame(streamFrame); responseContent.classList.remove("thinking", "is-streaming"); responseContent.textContent = error.message === "network" ? "Nexora AI is having trouble connecting. Please check your connection and try again." : error.message; } finally { setSending(false); }
 }
 document.getElementById("attachBtn").onclick = () => fileInput.click();
@@ -783,6 +836,7 @@ window.addEventListener("nexora-provider-change", (event) => { state.provider = 
 document.getElementById("logoutBtn").onclick = () => document.getElementById("settingsLogoutBtn").click();
 document.getElementById("loginModeButton").onclick = () => setAuthMode("login");
 document.getElementById("signupModeButton").onclick = () => setAuthMode("signup");
+document.getElementById("forgotPasswordButton").onclick = () => setAuthMode("reset");
 document.getElementById("emailAuthButton").onclick = beginEmailAuth;
 document.getElementById("verifyOtpButton").onclick = verifyEmailCode;
 document.getElementById("passwordInput").onkeydown = (event) => { if (event.key === "Enter") { if (document.getElementById("otpFields").hidden) beginEmailAuth(); else verifyEmailCode(); } };
@@ -806,6 +860,7 @@ document.getElementById("billingDialog").addEventListener("click", (event) => {
 (async function init() {
     try {
         state.config = await fetch("/config").then((response) => response.json());
+        renderEmailAuthButton();
         let session;
         for (let attempt = 0; attempt < 3; attempt += 1) {
             session = await fetch("/auth/me", { credentials: "same-origin", cache: "no-store" });

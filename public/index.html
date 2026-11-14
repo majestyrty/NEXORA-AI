@@ -33,13 +33,14 @@
             <div class="email-auth-fields">
                 <label for="emailInput">Email address</label>
                 <input id="emailInput" name="email" type="email" autocomplete="email" placeholder="you@example.com">
-                <label for="passwordInput">Password</label>
+                <label id="passwordLabel" for="passwordInput">Password</label>
                 <input id="passwordInput" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="128" placeholder="Enter a secure password">
                 <div id="otpFields" class="otp-fields" hidden>
                     <label for="otpInput">Verification code</label>
                     <input id="otpInput" name="otp" type="text" inputmode="numeric" maxlength="6" placeholder="123456" aria-label="Six digit verification code">
                 </div>
                 <button id="emailAuthButton" class="auth-submit-button email-auth-button" type="button">Continue with email</button>
+                <button id="forgotPasswordButton" class="forgot-password-button" type="button">Forgot password?</button>
                 <button id="verifyOtpButton" class="auth-submit-button verify-otp-button" type="button" hidden>Verify code</button>
                 <p id="emailAuthHint" class="email-auth-hint">We will send a 6-digit code to your email.</p>
             </div>

@@ -1041,6 +1041,21 @@ body {
     line-height: 1.5;
 }
 
+.forgot-password-button {
+    justify-self: end;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    font-size: .8rem;
+    cursor: pointer;
+}
+
+.forgot-password-button[hidden] {
+    display: none;
+}
+
 .auth-divider {
     display: flex;
     align-items: center;

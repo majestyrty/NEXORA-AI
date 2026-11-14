@@ -6,11 +6,13 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test": "node --test test/emailAuthStore.test.js test/emailAuthRoutes.test.js test/emailService.test.js"
   },
   "dependencies": {
     "@google/genai": "^2.14.0",
     "@napi-rs/canvas": "0.1.80",
+    "connect-pg-simple": "^10.0.0",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
     "exceljs": "^4.4.0",
@@ -22,6 +24,11 @@
     "memorystore": "^1.6.8",
     "multer": "^2.4.0",
     "openai": "^5.23.2",
-    "pdf-parse": "^2.4.5"
+    "pdf-parse": "^2.4.5",
+    "pg": "^8.23.1",
+    "resend": "^6.37.0"
+  },
+  "devDependencies": {
+    "pg-mem": "^3.0.14"
   }
 }
